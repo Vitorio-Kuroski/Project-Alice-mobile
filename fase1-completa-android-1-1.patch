@@ -1,0 +1,1263 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d47abce..8199631 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -13,6 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+ 
+ include(CTest)
++include(cmake/AliceHostTools.cmake)
+ 
+ add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
+ 
+@@ -262,6 +263,17 @@ add_executable(AliceExtra WIN32 EXCLUDE_FROM_ALL
+ 	${ALICE_INCREMENTAL_SOURCES_LIST}
+ 	"${PROJECT_SOURCE_DIR}/src/alice.rc"
+ 	${ASSET_FILES})
++elseif(ANDROID)
++# Android espera uma biblioteca compartilhada (.so) carregada via JNI/NativeActivity,
++# nao um executavel -- ela e empacotada dentro do APK no projeto Gradle (Fase 5)
++add_library(Alice SHARED
++	${ALICE_SOURCE_BLOB}
++	${ALICE_CORE_SOURCES_LIST}
++	${ASSET_FILES})
++add_library(AliceIncremental SHARED EXCLUDE_FROM_ALL
++	${ALICE_SOURCE_BLOB}
++	${ALICE_INCREMENTAL_SOURCES_LIST}
++	${ASSET_FILES})
+ else()
+ add_executable(Alice WIN32
+ 	${ALICE_SOURCE_BLOB}
+@@ -300,8 +312,15 @@ endif()
+ 
+ # Include sub-projects.
+ add_subdirectory(dependencies EXCLUDE_FROM_ALL)
+-add_subdirectory(ParserGenerator EXCLUDE_FROM_ALL)
+-add_subdirectory(FifInterfaceGenerator EXCLUDE_FROM_ALL)
++if(CMAKE_CROSSCOMPILING)
++	# ParserGenerator/DCONINTERFACEGEN rodam durante o build (geram .hpp) --
++	# nao dá pra compilá-los com o toolchain do NDK. Ver cmake/AliceHostTools.cmake.
++	alice_import_host_tool(ParserGenerator)
++	alice_import_host_tool(DCONINTERFACEGEN)
++else()
++	add_subdirectory(ParserGenerator EXCLUDE_FROM_ALL)
++	add_subdirectory(FifInterfaceGenerator EXCLUDE_FROM_ALL)
++endif()
+ 
+ add_library(AliceCommon INTERFACE)
+ target_compile_definitions(AliceCommon INTERFACE GLM_ENABLE_EXPERIMENTAL)
+@@ -442,6 +461,11 @@ if (WIN32)
+ 	target_link_libraries(AliceCommon INTERFACE ws2_32)
+ 	target_link_libraries(AliceCommon INTERFACE wsock32)
+ 	target_link_libraries(AliceCommon INTERFACE Imm32)
++elseif(ANDROID)
++	target_link_libraries(AliceCommon INTERFACE dependency_tbb)
++	# sem glfw aqui -- ver dependencies/CMakeLists.txt e src/window/window_android.cpp
++	target_link_libraries(AliceCommon INTERFACE miniaudio)
++	target_link_libraries(AliceCommon INTERFACE dependency_icu)
+ else()
+ 	target_link_libraries(AliceCommon INTERFACE dependency_tbb)
+ 	target_link_libraries(AliceCommon INTERFACE glfw)
+@@ -699,6 +723,10 @@ if(WIN32)
+ 	add_subdirectory(SaveEditor EXCLUDE_FROM_ALL)
+ 	add_subdirectory(DbgAlice EXCLUDE_FROM_ALL)
+ endif()
++if(NOT ANDROID)
++# O Launcher desktop (selecao de mods/pasta do jogo) tambem inclui GLFW direto
++# (src/launcher/launcher_main_nix.cpp) -- fica de fora do Android por enquanto;
++# uma tela equivalente no proprio app Android e coisa pra Fase 5.
+ add_subdirectory(Launcher)
+ 
+ add_dependencies(launch_alice GENERATE_CONTAINER ParserGenerator)
+@@ -706,9 +734,10 @@ add_dependencies(launch_alice GENERATE_CONTAINERIFACE)
+ add_dependencies(launch_alice GENERATE_CONTAINER_LUA)
+ add_dependencies(launch_alice GENERATE_CONTAINER_OOS)
+ add_dependencies(launch_alice GENERATE_PARSERS)
++endif()
+ 
+ # Installation
+-if(NOT WIN32)
++if(NOT WIN32 AND NOT ANDROID)
+ 	install(TARGETS Alice launch_alice
+ 		RUNTIME DESTINATION bin
+ 		LIBRARY DESTINATION lib
+diff --git a/CMakePresets.json b/CMakePresets.json
+index dd59e5b..4cd1209 100644
+--- a/CMakePresets.json
++++ b/CMakePresets.json
+@@ -292,6 +292,27 @@
+         "CMAKE_BUILD_TYPE": "Release",
+         "VECTOR_MODE": "AVX512"
+       }
++    },
++    {
++      "name": "android-base",
++      "hidden": true,
++      "binaryDir": "${sourceDir}/out/build/${presetName}",
++      "installDir": "${sourceDir}/out/install/${presetName}",
++      "generator": "Ninja",
++      "toolchainFile": "$env{ANDROID_NDK}/build/cmake/android.toolchain.cmake",
++      "cacheVariables": {
++        "ANDROID_PLATFORM": "android-31",
++        "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
++      }
++    },
++    {
++      "name": "android-arm64",
++      "displayName": "Android ARM64 Debug",
++      "inherits": "android-base",
++      "cacheVariables": {
++        "ANDROID_ABI": "arm64-v8a",
++        "CMAKE_BUILD_TYPE": "Debug"
++      }
+     }
+   ]
+ }
+diff --git a/cmake/AliceHostTools.cmake b/cmake/AliceHostTools.cmake
+new file mode 100644
+index 0000000..63587ae
+--- /dev/null
++++ b/cmake/AliceHostTools.cmake
+@@ -0,0 +1,62 @@
++# cmake/AliceHostTools.cmake
++#
++# ParserGenerator, DCONGENERATOR, DCONINTERFACEGEN, DataContainer-Lua e
++# DataContainer_OOS_Reporter sao executados DURANTE o build (via
++# add_custom_command) pra gerar .hpp que o resto do codigo depende. Isso
++# significa que eles precisam ser binarios de HOST -- se o CMake os compilar
++# com o toolchain do NDK (cross-compiling), o binario resultante e ARM e nao
++# roda no PC/host pra gerar o arquivo, travando o build inteiro.
++#
++# Fluxo pra Android (ou qualquer cross-compile):
++#   1) Build nativo normal primeiro, so pra essas 5 ferramentas:
++#        cmake --preset x64-debug-linux-clang
++#        cmake --build --preset x64-debug-linux-clang --target \
++#            ParserGenerator DCONGENERATOR DCONINTERFACEGEN \
++#            DataContainer-Lua DataContainer_OOS_Reporter
++#   2) Copiar os 5 binarios gerados pra uma pasta separada e "achatada", ex:
++#        mkdir -p native-tools
++#        find out/build/x64-debug-linux-clang -type f \
++#            \( -name ParserGenerator -o -name DCONGENERATOR -o -name DCONINTERFACEGEN \
++#               -o -name DataContainer-Lua -o -name DataContainer_OOS_Reporter \) \
++#            -exec cp {} native-tools/ \;
++#   3) Configurar o preset Android apontando pra essa pasta:
++#        cmake --preset android-arm64 -DALICE_NATIVE_TOOLS_DIR=$(pwd)/native-tools
++#
++# alice_import_host_tool(<nome-do-alvo>) cria um alvo IMPORTED com esse nome
++# apontando pro binario ja compilado -- os add_custom_command/add_dependencies
++# existentes que referenciam esse nome continuam funcionando sem mudar nada,
++# porque o CMake resolve pelo nome do alvo, nao importa se ele e IMPORTED ou nao.
++
++set(ALICE_NATIVE_TOOLS_DIR "" CACHE PATH
++	"Pasta com os binarios de host pre-compilados de ParserGenerator/DCONGENERATOR/DCONINTERFACEGEN/DataContainer-Lua/DataContainer_OOS_Reporter (necessario ao cross-compilar, ex: Android)")
++
++function(alice_import_host_tool TOOL_NAME)
++	if(TARGET ${TOOL_NAME})
++		return() # ja existe (build nativo normal cuidou disso) -- nada a fazer
++	endif()
++
++	if(NOT ALICE_NATIVE_TOOLS_DIR)
++		message(FATAL_ERROR
++			"Cross-compilando (CMAKE_CROSSCOMPILING=ON) mas ALICE_NATIVE_TOOLS_DIR nao foi definido.\n"
++			"'${TOOL_NAME}' roda DURANTE o build pra gerar codigo e precisa ser um binario de "
++			"HOST, nao ${CMAKE_SYSTEM_NAME}${CMAKE_ANDROID_ARCH_ABI}.\n"
++			"Builde-o nativamente primeiro (preset desktop) e aponte -DALICE_NATIVE_TOOLS_DIR=<pasta>. "
++			"Ver comentario no topo de cmake/AliceHostTools.cmake para o passo a passo.")
++	endif()
++
++	find_program(ALICE_${TOOL_NAME}_PATH
++		NAMES ${TOOL_NAME}
++		PATHS "${ALICE_NATIVE_TOOLS_DIR}"
++		NO_DEFAULT_PATH)
++
++	if(NOT ALICE_${TOOL_NAME}_PATH)
++		message(FATAL_ERROR
++			"Nao encontrei um binario de host chamado '${TOOL_NAME}' dentro de "
++			"ALICE_NATIVE_TOOLS_DIR='${ALICE_NATIVE_TOOLS_DIR}'. Builde-o nativamente primeiro "
++			"(ver comentario no topo de cmake/AliceHostTools.cmake).")
++	endif()
++
++	add_executable(${TOOL_NAME} IMPORTED GLOBAL)
++	set_target_properties(${TOOL_NAME} PROPERTIES IMPORTED_LOCATION "${ALICE_${TOOL_NAME}_PATH}")
++	message(STATUS "${TOOL_NAME}: usando binario de host pre-compilado em ${ALICE_${TOOL_NAME}_PATH}")
++endfunction()
+diff --git a/dependencies/CMakeLists.txt b/dependencies/CMakeLists.txt
+index 4d137f6..54128ec 100644
+--- a/dependencies/CMakeLists.txt
++++ b/dependencies/CMakeLists.txt
+@@ -11,7 +11,11 @@ add_subdirectory(glm)
+ add_subdirectory(freetype)
+ add_subdirectory(luajit)
+ if (NOT WIN32)
+-	add_subdirectory(glfw)
++	if (NOT ANDROID)
++		# GLFW nao suporta Android (nao ha X11/Wayland/Cocoa la) -- a janela/contexto
++		# no Android vem do NativeActivity + EGL (ver src/window/window_android.cpp)
++		add_subdirectory(glfw)
++	endif()
+ 	add_subdirectory(miniaudio)
+ 	add_subdirectory(tbb)
+ 	add_subdirectory(icu)
+diff --git a/dependencies/DataContainerGenerator/CMakeLists.txt b/dependencies/DataContainerGenerator/CMakeLists.txt
+index ad9db56..7f07f81 100644
+--- a/dependencies/DataContainerGenerator/CMakeLists.txt
++++ b/dependencies/DataContainerGenerator/CMakeLists.txt
+@@ -13,6 +13,11 @@ FetchContent_MakeAvailable(DataContainer)
+ add_library(dependency_DataContainer INTERFACE)
+ target_include_directories(dependency_DataContainer SYSTEM INTERFACE "${datacontainer_SOURCE_DIR}/CommonIncludes/")
+ 
++if(CMAKE_CROSSCOMPILING)
++	# DCONGENERATOR roda durante o build (gera .hpp) -- nao dá pra compilá-lo
++	# com o toolchain do NDK. Ver cmake/AliceHostTools.cmake.
++	alice_import_host_tool(DCONGENERATOR)
++else()
+ # CONTAINER GENERATOR
+ file(GLOB_RECURSE DCONGENERATOR_SOURCE "${datacontainer_SOURCE_DIR}/DataContainerGenerator/*.cpp")
+ 
+@@ -46,3 +51,4 @@ else() # GCC or CLANG
+ 		$<$<CONFIG:Debug>:			-g>
+ 		$<$<NOT:$<CONFIG:Debug>>: 	-O3>)
+ endif()
++endif()
+diff --git a/dependencies/DataContainerLuaGenerator/CMakeLists.txt b/dependencies/DataContainerLuaGenerator/CMakeLists.txt
+index f9ccbf4..f0f610d 100644
+--- a/dependencies/DataContainerLuaGenerator/CMakeLists.txt
++++ b/dependencies/DataContainerLuaGenerator/CMakeLists.txt
+@@ -1,13 +1,21 @@
+-message(STATUS "Fetching DataContainerLua...")
++if(CMAKE_CROSSCOMPILING)
++	# DataContainer-Lua roda durante o build (gera codigo) -- o proprio
++	# CMakeLists.txt desse repositorio de terceiros define o add_executable,
++	# entao nem chegamos a fazer o FetchContent aqui ao cross-compilar (senao
++	# o CMake tentaria compila-lo com o toolchain do NDK). Ver cmake/AliceHostTools.cmake.
++	alice_import_host_tool(DataContainer-Lua)
++else()
++	message(STATUS "Fetching DataContainerLua...")
+ 
+-FetchContent_Declare(
+-	DataContainerLua
+-	GIT_REPOSITORY https://github.com/ineveraskedforthis/DataContainer-Lua
+-	GIT_TAG main
+-	GIT_SHALLOW 1
+-	GIT_PROGRESS TRUE
+-)
++	FetchContent_Declare(
++		DataContainerLua
++		GIT_REPOSITORY https://github.com/ineveraskedforthis/DataContainer-Lua
++		GIT_TAG main
++		GIT_SHALLOW 1
++		GIT_PROGRESS TRUE
++	)
+ 
+-FetchContent_MakeAvailable(DataContainerLua)
++	FetchContent_MakeAvailable(DataContainerLua)
++endif()
+ 
+ add_library(dependency_DataContainerLua INTERFACE)
+diff --git a/dependencies/DataContainerOOSReporter/CMakeLists.txt b/dependencies/DataContainerOOSReporter/CMakeLists.txt
+index 8762c26..831134d 100644
+--- a/dependencies/DataContainerOOSReporter/CMakeLists.txt
++++ b/dependencies/DataContainerOOSReporter/CMakeLists.txt
+@@ -1,13 +1,20 @@
+-message(STATUS "Fetching DataContainerOOSReporter...")
++if(CMAKE_CROSSCOMPILING)
++	# Mesmo caso do DataContainer-Lua: DataContainer_OOS_Reporter roda durante
++	# o build e o executavel e definido no CMakeLists.txt de terceiros -- ver
++	# cmake/AliceHostTools.cmake.
++	alice_import_host_tool(DataContainer_OOS_Reporter)
++else()
++	message(STATUS "Fetching DataContainerOOSReporter...")
+ 
+-FetchContent_Declare(
+-	DataContainerOOSReporter
+-	GIT_REPOSITORY https://github.com/ZombieFreak115/DataContainer_OOS_Reporter
+-	GIT_TAG master
+-	GIT_SHALLOW 1
+-	GIT_PROGRESS TRUE
+-)
++	FetchContent_Declare(
++		DataContainerOOSReporter
++		GIT_REPOSITORY https://github.com/ZombieFreak115/DataContainer_OOS_Reporter
++		GIT_TAG master
++		GIT_SHALLOW 1
++		GIT_PROGRESS TRUE
++	)
+ 
+-FetchContent_MakeAvailable(DataContainerOOSReporter)
++	FetchContent_MakeAvailable(DataContainerOOSReporter)
++endif()
+ 
+ add_library(dependency_DataContainerOOSReporter INTERFACE)
+diff --git a/dependencies/icu/CMakeLists.txt b/dependencies/icu/CMakeLists.txt
+index ad79601..1c93d6a 100644
+--- a/dependencies/icu/CMakeLists.txt
++++ b/dependencies/icu/CMakeLists.txt
+@@ -1,6 +1,19 @@
+-message(STATUS "Fetching icu...")
++if(ANDROID)
++	# ICU4C nativo do NDK (Android 12 / API 31+, NDK r22b+) -- sem find_package,
++	# sem compilar/vendorizar ICU. So expoe um subconjunto da API C: falta
++	# unicode/ubidi.h inteiro e ubrk_openBinaryRules/ubrk_getBinaryRules --
++	# ver src/text/icu_android_compat.hpp pros contornos.
++	find_library(ALICE_NDK_ICU_LIB icu)
++	if(NOT ALICE_NDK_ICU_LIB)
++		message(FATAL_ERROR "libicu do NDK nao encontrada -- confira se ANDROID_PLATFORM >= 31 (API 31, Android 12) no preset.")
++	endif()
++	add_library(dependency_icu INTERFACE)
++	target_link_libraries(dependency_icu INTERFACE ${ALICE_NDK_ICU_LIB})
++else()
++	message(STATUS "Fetching icu...")
+ 
+-find_package(ICU 70.1 COMPONENTS uc i18n REQUIRED)
++	find_package(ICU 70.1 COMPONENTS uc i18n REQUIRED)
+ 
+-add_library(dependency_icu INTERFACE)
+-target_link_libraries(dependency_icu INTERFACE ICU::uc ICU::i18n)
++	add_library(dependency_icu INTERFACE)
++	target_link_libraries(dependency_icu INTERFACE ICU::uc ICU::i18n)
++endif()
+diff --git a/dependencies/luajit/CMakeLists.txt b/dependencies/luajit/CMakeLists.txt
+index 791369b..7f0436a 100644
+--- a/dependencies/luajit/CMakeLists.txt
++++ b/dependencies/luajit/CMakeLists.txt
+@@ -7,6 +7,54 @@ if(WIN32)
+ else()
+ 	message(STATUS "Fetching luajit...")
+ 	include(ExternalProject)
++
++	# Ativa isso (ou passe -DALICE_ANDROID_LUAJIT_DISABLE_JIT=ON) se o JIT travar
++	# em runtime em algum aparelho por causa de W^X/SELinux mais restritivo --
++	# aparelhos "de fabrica" costumam aceitar numa boa, porque o LuaJIT nunca
++	# pede memoria RWX de uma vez so (sempre alterna write/exec via mprotect
++	# sequencial), mas alguns fabricantes endurecem isso alem do AOSP padrao.
++	option(ALICE_ANDROID_LUAJIT_DISABLE_JIT "Compilar o LuaJIT em modo interpretado (sem JIT) no Android" OFF)
++
++	if(ANDROID)
++		# LuaJIT cross-compila via Makefile proprio, nao entende o toolchain file
++		# do CMake sozinho -- precisa apontar os binarios do NDK na mao.
++		# Ao contrario do alvo armeabi-v7a (32-bit), arm64-v8a nao precisa de
++		# HOST_CC especial: host (x86_64) e alvo (aarch64) tem o mesmo tamanho de
++		# ponteiro (64 bits), que e a unica exigencia do Makefile do LuaJIT pra
++		# rodar minilua/buildvm com o compilador padrao do host.
++		# Ver https://luajit.org/install.html (secao Android/ARM64).
++		if(NOT DEFINED ENV{ANDROID_NDK})
++			message(FATAL_ERROR "ANDROID_NDK nao esta definida no ambiente -- necessaria pra cross-compilar o LuaJIT (ver toolchainFile em CMakePresets.json).")
++		endif()
++
++		if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
++			set(ALICE_NDK_HOST_TAG "linux-x86_64")
++		elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
++			set(ALICE_NDK_HOST_TAG "darwin-x86_64")
++		else()
++			set(ALICE_NDK_HOST_TAG "windows-x86_64")
++		endif()
++
++		string(REPLACE "android-" "" ALICE_ANDROID_API "${ANDROID_PLATFORM}")
++		set(ALICE_NDK_BIN "$ENV{ANDROID_NDK}/toolchains/llvm/prebuilt/${ALICE_NDK_HOST_TAG}/bin")
++		set(ALICE_NDK_CLANG "${ALICE_NDK_BIN}/aarch64-linux-android${ALICE_ANDROID_API}-clang")
++
++		set(ALICE_LUAJIT_BUILD_COMMAND make
++			"CROSS=${ALICE_NDK_BIN}/aarch64-linux-android-"
++			"STATIC_CC=${ALICE_NDK_CLANG}"
++			"DYNAMIC_CC=${ALICE_NDK_CLANG} -fPIC"
++			"TARGET_LD=${ALICE_NDK_CLANG}"
++			"TARGET_AR=${ALICE_NDK_BIN}/llvm-ar rcus"
++			"TARGET_STRIP=${ALICE_NDK_BIN}/llvm-strip"
++			"TARGET_SYS=Linux")
++	else()
++		set(ALICE_LUAJIT_BUILD_COMMAND make)
++	endif()
++
++	if(ALICE_ANDROID_LUAJIT_DISABLE_JIT)
++		list(APPEND ALICE_LUAJIT_BUILD_COMMAND "XCFLAGS=-DLUAJIT_DISABLE_JIT")
++	endif()
++
+ 	ExternalProject_Add(
+ 		luajit
+ 
+@@ -18,7 +66,7 @@ else()
+ 		GIT_PROGRESS TRUE
+ 
+ 		CONFIGURE_COMMAND ""
+-		BUILD_COMMAND make
++		BUILD_COMMAND ${ALICE_LUAJIT_BUILD_COMMAND}
+ 
+ 		BUILD_IN_SOURCE TRUE
+ 		BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/luajit/source/luajit.h
+diff --git a/src/entry_point_android.cpp b/src/entry_point_android.cpp
+new file mode 100644
+index 0000000..d3f94da
+--- /dev/null
++++ b/src/entry_point_android.cpp
+@@ -0,0 +1,44 @@
++// entry_point_android.cpp
++//
++// ATENCAO: placeholder. entry_point_nix.cpp (402 linhas) faz bem mais que so
++// abrir a janela -- carrega mods, monta/verifica o scenario file, parseia
++// argumentos de linha de comando (--mod, porta de multiplayer, etc.) antes de
++// finalmente chamar window::create_window(...). Portar tudo isso pro ciclo de
++// vida do Android e trabalho de verdade da Fase 4, incluindo:
++//   - usar android_native_app_glue em vez de um main() tradicional;
++//   - so criar a janela/contexto dentro do callback APP_CMD_INIT_WINDOW;
++//   - tratar APP_CMD_PAUSE/RESUME/TERM_WINDOW (o Android pode pausar ou matar
++//     o app a qualquer momento -- nao existe isso no fluxo desktop);
++//   - decidir de onde vem o "--mod"/selecao de scenario sem terminal
++//     (provavelmente uma tela propria no app, nao argv).
++//
++// Por enquanto isso so faz o suficiente pra existir um android_main() valido
++// e a Fase 1.4 conseguir compilar/linkar.
++
++#include <android_native_app_glue.h>
++#include <android/log.h>
++
++#include "system_state.hpp"
++#include "parsers_declarations.hpp"
++
++static sys::state game_state;
++
++void android_main(struct android_app* app) {
++	__android_log_print(ANDROID_LOG_INFO, "Alice", "android_main iniciado (entry point ainda placeholder)");
++
++	// TODO (Fase 4): loop de eventos padrao do android_native_app_glue, tratando
++	// app->onAppCmd (APP_CMD_INIT_WINDOW -> window::create_window(...), etc.)
++	// e app->onInputEvent, ate ALOOPER_POLL_ONCE indicar destruicao do app.
++	int events;
++	struct android_poll_source* source;
++	while(true) {
++		while(ALooper_pollAll(-1, nullptr, &events, (void**)&source) >= 0) {
++			if(source != nullptr) {
++				source->process(app, source);
++			}
++			if(app->destroyRequested != 0) {
++				return;
++			}
++		}
++	}
++}
+diff --git a/src/graphics/opengl_wrapper_android.cpp b/src/graphics/opengl_wrapper_android.cpp
+new file mode 100644
+index 0000000..e691154
+--- /dev/null
++++ b/src/graphics/opengl_wrapper_android.cpp
+@@ -0,0 +1,36 @@
++// opengl_wrapper_android.cpp
++//
++// ATENCAO: isso aqui e so um placeholder, nao uma implementacao real ainda.
++// A versao _nix (opengl_wrapper_nix.cpp) so faz glfwMakeContextCurrent +
++// glfwSwapInterval porque a CRIACAO do contexto ja aconteceu no glfwCreateWindow
++// (dentro de window_nix.cpp). No Android quem cria o EGLContext/EGLSurface e o
++// window_android.cpp (a partir do ANativeWindow recebido em APP_CMD_INIT_WINDOW),
++// entao esse arquivo so devera existir pra chamar eglMakeCurrent/eglSwapInterval
++// usando os handles guardados em win_ptr (egl_display/egl_surface/egl_context).
++//
++// Alem disso, opengl_wrapper.hpp inclui GLEW (desktop-only, nao funciona com
++// GLES) -- resolver isso e trabalho da Fase 3 (portar os shaders GLSL -> GLSL ES
++// tambem implica trocar o carregador de extensoes; GLES normalmente nao precisa
++// de GLEW, as funcoes vem direto dos headers do sistema). Por isso as funcoes
++// abaixo ainda nao tentam usar EGL de verdade -- so evitam quebrar o link.
++
++#include "opengl_wrapper.hpp"
++#include "system_state.hpp"
++
++#include <android/log.h>
++
++namespace ogl {
++
++void create_opengl_context(sys::state& state) {
++	// TODO (Fase 3/4): eglMakeCurrent(win_ptr->egl_display, win_ptr->egl_surface,
++	//                                  win_ptr->egl_surface, win_ptr->egl_context);
++	//                  eglSwapInterval(win_ptr->egl_display, 1);
++	// Pendente de: (a) window_android.cpp criar o contexto EGL de verdade (Fase 4),
++	//              (b) GLEW ser substituido por um caminho GLES (Fase 3).
++	__android_log_print(ANDROID_LOG_ERROR, "Alice",
++			"create_opengl_context (EGL) ainda nao implementado (Fase 3/4)");
++}
++
++void shutdown_opengl(sys::state& state) { }
++
++} // namespace ogl
+diff --git a/src/platform_specific.cpp b/src/platform_specific.cpp
+index 6c333db..3464bb9 100644
+--- a/src/platform_specific.cpp
++++ b/src/platform_specific.cpp
+@@ -20,6 +20,20 @@
+ #include "entry_point_win.cpp"
+ #endif
+ 
++#elif defined(__ANDROID__)
++// ANDROID implementations go here
++// simple_fs_nix.cpp e reaproveitado (so usa POSIX puro: dirent/fcntl/mmap/stat/unistd,
++// tudo disponivel na libc do NDK); o Storage Access Framework para acessar os arquivos
++// do Victoria 2 copiados pelo usuario fica pra Fase 5, nao bloqueia a compilacao.
++#include "simple_fs_nix.cpp"
++#include "window_android.cpp"
++#include "sound_android.cpp"
++#include "opengl_wrapper_android.cpp"
++
++#ifndef ALICE_NO_ENTRY_POINT
++#include "entry_point_android.cpp"
++#endif
++
+ #else
+ // LINUX implementations go here
+ 
+diff --git a/src/sound/sound_android.cpp b/src/sound/sound_android.cpp
+new file mode 100644
+index 0000000..fcc82e6
+--- /dev/null
++++ b/src/sound/sound_android.cpp
+@@ -0,0 +1,444 @@
++// sound_android.cpp
++//
++// Praticamente identico ao sound_nix.cpp -- a engine (miniaudio) e o wrapper
++// (sound_impl / audio_instance, de sound_nix.hpp) ja sao multiplataforma.
++// A unica coisa que muda de fato e qual backend nativo do miniaudio habilitar:
++//  - OpenSL ES: um dos backends nativos do Android -- diferente do _nix.cpp,
++//    aqui ele fica HABILITADO (nao definimos MA_NO_OPENSL).
++//  - AAudio: o miniaudio tenta usar automaticamente em NDK/API level recentes,
++//    sem precisar de define extra.
++//  - PulseAudio/ALSA/JACK: nao existem no Android (nao ha libasound/libpulse
++//    no NDK), entao ficam desabilitados aqui (o sound_nix.cpp original conta
++//    com eles estarem disponiveis via miniaudio nao os desabilitar).
++#include "sound.hpp"
++#include "system_state.hpp"
++
++#define MINIAUDIO_IMPLEMENTATION 1
++#define MA_NO_FLAC 1
++#define MA_NO_WEBAUDIO 1
++#define MA_NO_SNDIO 1
++#define MA_NO_AUDIO4 1
++#define MA_NO_WINMM 1
++#define MA_NO_WASAPI 1
++#define MA_NO_COREAUDIO 1
++#define MA_NO_PULSEAUDIO 1
++#define MA_NO_ALSA 1
++#define MA_NO_JACK 1
++#include "miniaudio.h"
++
++namespace sound {
++
++sound_impl::sound_impl() {
++	if(ma_engine_init(NULL, &engine) != MA_SUCCESS) {
++		std::abort(); //TODO: This shouldn't be a cause for abort
++	}
++}
++
++sound_impl::~sound_impl() {
++	ma_engine_uninit(&engine);
++}
++
++void sound_impl::set_volume(std::optional<ma_sound>& sound, float volume) {
++	if(sound.has_value()) {
++		ma_sound_set_volume(&*sound, volume);
++	}
++}
++
++void sound_impl::override_sound(std::optional<ma_sound>& sound, audio_instance& s, float volume) {
++	if(sound.has_value()) {
++		ma_sound_uninit(&*sound);
++	}
++
++	sound.reset();
++	sound.emplace();
++	ma_result result = ma_sound_init_from_file(&engine, s.filename.c_str(), 0, NULL, NULL, &*sound);
++	if(result == MA_SUCCESS) {
++		set_volume(sound, volume);
++		ma_sound_start(&*sound);
++	}
++}
++
++void sound_impl::play_music(int32_t track, float volume) {
++	current_music = track;
++
++	audio_instance audio{};
++	audio.filename = music_list[track].filename.c_str();
++	override_sound(music, audio, volume);
++}
++
++void sound_impl::play_new_track(sys::state& ws) {
++	if(music_list.size() > 0) {
++		int32_t result = int32_t(rand() % music_list.size()); // well aware that using rand is terrible, thanks
++		for(uint32_t i = 0; i < 16 && result == last_music; i++) {
++			result = int32_t(rand() % music_list.size());
++		}
++		play_music(result, ws.user_settings.master_volume * ws.user_settings.music_volume);
++	}
++}
++void sound_impl::play_next_track(sys::state& ws) {
++	if(music_list.size() > 0) {
++		int32_t result = int32_t((last_music + 1) % music_list.size());
++		play_music(result, ws.user_settings.master_volume * ws.user_settings.music_volume);
++	}
++}
++void sound_impl::play_previous_track(sys::state& ws) {
++	if(music_list.size() > 0) {
++		int32_t result = int32_t((last_music - 1) % music_list.size());
++		play_music(result, ws.user_settings.master_volume * ws.user_settings.music_volume);
++	}
++}
++
++bool sound_impl::music_finished() {
++	if(music.has_value())
++		return music->atEnd;
++	return true;
++}
++
++void initialize_sound_system(sys::state& state) {
++	state.sound_ptr = std::make_unique<sound_impl>();
++
++	auto root_dir = simple_fs::get_root(state.common_fs);
++	auto const music_dir = simple_fs::open_directory(root_dir, NATIVE("music"));
++	for(auto const& mp3_file : simple_fs::list_files(music_dir, NATIVE(".mp3"))) {
++		audio_instance audio{};
++		audio.set_file(simple_fs::get_full_name(mp3_file));
++		state.sound_ptr->music_list.emplace_back(audio);
++		auto file_name = simple_fs::get_full_name(mp3_file);
++		if(parsers::native_has_fixed_suffix_ci(file_name.c_str(), file_name.c_str() + file_name.length(), NATIVE("thecoronation_titletheme.mp3")))
++			state.sound_ptr->first_music = int32_t(state.sound_ptr->music_list.size()) - 1;
++	}
++	for(auto const& music_subdir : simple_fs::list_subdirectories(music_dir)) {
++		for(auto const& mp3_file : simple_fs::list_files(music_subdir, NATIVE(".mp3"))) {
++			audio_instance audio{};
++			audio.set_file(simple_fs::get_full_name(mp3_file));
++			state.sound_ptr->music_list.emplace_back(audio);
++		}
++	}
++
++	struct {
++		audio_instance* audio;
++		native_string_view name;
++	} vanilla_sound_table[] = {
++		//{ &state.sound_ptr->click_sound, NATIVE("GI_ValidClick.wav") },
++		{ &state.sound_ptr->technology_finished_sound, NATIVE("UI_TechnologyFinished.wav") },
++		{ &state.sound_ptr->army_move_sound, NATIVE("GI_InfantryMove.wav") },
++		{ &state.sound_ptr->army_select_sound, NATIVE("GI_InfantrySelected.wav") },
++		{ &state.sound_ptr->navy_move_sound, NATIVE("UI_SailMove.wav") },
++		{ &state.sound_ptr->navy_select_sound, NATIVE("UI_SailSelected.wav") },
++		{ &state.sound_ptr->declaration_of_war_sound, NATIVE("DeclarationofWar.wav") },
++		{ &state.sound_ptr->chat_message_sound, NATIVE("GI_ChatMessage.wav") },
++		{ &state.sound_ptr->error_sound, NATIVE("GI_ErrorBlip.wav") },
++		{ &state.sound_ptr->peace_sound, NATIVE("Misc_Peace.wav") },
++		{ &state.sound_ptr->army_built_sound, NATIVE("UI_LandUnitFinished.wav") },
++		{ &state.sound_ptr->navy_built_sound, NATIVE("UI_NavalUnitFinished.wav") },
++		{ &state.sound_ptr->factory_built_sound, NATIVE("Misc_NewFactory.wav") },
++		{ &state.sound_ptr->revolt_sound, NATIVE("Misc_revolt.wav") },
++		{ &state.sound_ptr->fort_built_sound, NATIVE("Misc_Fortification.wav") },
++		{ &state.sound_ptr->railroad_built_sound, NATIVE("Misc_Infrastructure.wav") },
++		{ &state.sound_ptr->naval_base_built_sound, NATIVE("Misc_CoalingStation.wav") },
++		{ &state.sound_ptr->minor_event_sound, NATIVE("GI_MinorBlip.wav") },
++		{ &state.sound_ptr->major_event_sound, NATIVE("Misc_Attention.wav") },
++		{ &state.sound_ptr->decline_sound, NATIVE("GI_FailureBlip.wav") },
++		{ &state.sound_ptr->accept_sound, NATIVE("GI_SuccessBlip.wav") },
++		{ &state.sound_ptr->diplomatic_request_sound, NATIVE("GI_MessageWindow.wav") },
++		{ &state.sound_ptr->election_sound, NATIVE("Misc_ElectionHeld.wav") },
++		{ &state.sound_ptr->land_battle_sounds[0], NATIVE("Combat_Cavalry_1.wav") },
++		{ &state.sound_ptr->land_battle_sounds[1], NATIVE("Combat_Cavalry_2.wav") },
++		{ &state.sound_ptr->land_battle_sounds[2], NATIVE("Combat_Cavalry_3.wav") },
++		{ &state.sound_ptr->land_battle_sounds[3], NATIVE("Combat_Infantry_1.wav") },
++		{ &state.sound_ptr->land_battle_sounds[4], NATIVE("Combat_Infantry_2.wav") },
++		{ &state.sound_ptr->land_battle_sounds[5], NATIVE("Combat_Infantry_3.wav") },
++		{ &state.sound_ptr->naval_battle_sounds[0], NATIVE("Combat_MajorShip_1.wav") },
++		{ &state.sound_ptr->naval_battle_sounds[1], NATIVE("Combat_MajorShip_2.wav") },
++		{ &state.sound_ptr->naval_battle_sounds[2], NATIVE("Combat_MajorShip_3.wav") },
++		{ &state.sound_ptr->naval_battle_sounds[3], NATIVE("Combat_MinorShip_1.wav") },
++		{ &state.sound_ptr->naval_battle_sounds[4], NATIVE("Combat_MinorShip_2.wav") },
++		{ &state.sound_ptr->naval_battle_sounds[5], NATIVE("Combat_MinorShip_3.wav") },
++	};
++	auto const sound_directory = simple_fs::open_directory(root_dir, NATIVE("sound"));
++	for(const auto& e : vanilla_sound_table) {
++		auto file_peek = simple_fs::peek_file(sound_directory, e.name);
++		e.audio->set_file(file_peek ? simple_fs::get_full_name(*file_peek) : native_string());
++	}
++	struct {
++		audio_instance* audio;
++		native_string_view name;
++	} new_sound_table[] = {
++		{ &state.sound_ptr->click_sound, NATIVE("NU_AltClick.wav") },
++		{ &state.sound_ptr->click_left_sound, NATIVE("NU_ClickL.wav") },
++		{ &state.sound_ptr->click_right_sound, NATIVE("NU_ClickR.wav") },
++		{ &state.sound_ptr->console_open_sound, NATIVE("NU_OpenConsole.wav") },
++		{ &state.sound_ptr->console_close_sound, NATIVE("NU_CloseConsole.wav") },
++		{ &state.sound_ptr->tab_budget_sound, NATIVE("NU_TabBudget.wav") },
++		{ &state.sound_ptr->hover_sound, NATIVE("NU_Hover.wav") },
++		{ &state.sound_ptr->checkbox_sound, NATIVE("NU_Checkbox.wav") },
++		{ &state.sound_ptr->enact_sound, NATIVE("NU_Enact.wav") },
++		{ &state.sound_ptr->subtab_sound, NATIVE("NU_Subtab.wav") },
++		{ &state.sound_ptr->delete_sound, NATIVE("NU_Delete.wav") },
++		{ &state.sound_ptr->autochoose_sound, NATIVE("NU_Autochoose.wav") },
++		{ &state.sound_ptr->tab_politics_sound, NATIVE("NU_TabPolitics.wav") },
++		{ &state.sound_ptr->tab_diplomacy_sound, NATIVE("NU_TabDiplomacy.wav") },
++		{ &state.sound_ptr->tab_military_sound, NATIVE("NU_TabMilitary.wav") },
++		{ &state.sound_ptr->tab_population_sound, NATIVE("NU_TabPopulation.wav") },
++		{ &state.sound_ptr->tab_production_sound, NATIVE("NU_TabProduction.wav") },
++		{ &state.sound_ptr->tab_technology_sound, NATIVE("NU_TabTechnology.wav") },
++		{ &state.sound_ptr->tab_military_sound, NATIVE("NU_TabMilitary.wav") },
++		{ &state.sound_ptr->event_sound, NATIVE("NU_Event.wav") },
++		{ &state.sound_ptr->decision_sound, NATIVE("NU_Decision.wav") },
++		{ &state.sound_ptr->pause_sound, NATIVE("NU_Pause.wav") },
++		{ &state.sound_ptr->unpause_sound, NATIVE("NU_Unpause.wav") },
++		{ &state.sound_ptr->enemycapitulated, NATIVE("enemycapitulated.wav") },
++		{ &state.sound_ptr->wecapitulated, NATIVE("wecapitulated.wav") },
++		{ &state.sound_ptr->province_select_sounds[0], NATIVE("NU_ProvSelect1.wav") },
++		{ &state.sound_ptr->province_select_sounds[1], NATIVE("NU_ProvSelect2.wav") },
++		{ &state.sound_ptr->province_select_sounds[2], NATIVE("NU_ProvSelect3.wav") },
++		{ &state.sound_ptr->province_select_sounds[3], NATIVE("NU_ProvSelect4.wav") },
++	};
++	auto const assets_directory = simple_fs::open_directory(root_dir, NATIVE("\\assets"));
++	for(const auto& e : new_sound_table) {
++		auto file_peek = simple_fs::peek_file(assets_directory, e.name);
++		e.audio->set_file(file_peek ? simple_fs::get_full_name(*file_peek) : native_string());
++	}
++}
++void change_effect_volume(sys::state& state, float v) {
++	state.sound_ptr->set_volume(state.sound_ptr->effect_sound, v);
++}
++void change_interface_volume(sys::state& state, float v) {
++	state.sound_ptr->set_volume(state.sound_ptr->interface_sound, v);
++}
++void change_music_volume(sys::state& state, float v) {
++	state.sound_ptr->set_volume(state.sound_ptr->music, v);
++}
++
++void play_effect(sys::state& state, audio_instance& s, float volume) {
++	if(state.sound_ptr->global_pause)
++		return;
++	state.sound_ptr->override_sound(state.sound_ptr->effect_sound, s, volume);
++}
++void play_interface_sound(sys::state& state, audio_instance& s, float volume) {
++	if(state.sound_ptr->global_pause)
++		return;
++	state.sound_ptr->override_sound(state.sound_ptr->interface_sound, s, volume);
++}
++
++void stop_music(sys::state& state) {
++	if(state.sound_ptr->music.has_value()) {
++		ma_sound_stop(&*state.sound_ptr->music);
++	}
++}
++void start_music(sys::state& state, float v) {
++	if(v > 0.0f && state.sound_ptr->music_list.size() != 0) {
++		if(state.sound_ptr->first_music != -1) {
++			state.sound_ptr->play_music(state.sound_ptr->first_music, v);
++		} else {
++			if(state.sound_ptr->music.has_value()) {
++				ma_sound_start(&*state.sound_ptr->music);
++			}
++		}
++	}
++}
++
++void pause_all(sys::state& state) {
++	if(state.sound_ptr.get()) {
++		state.sound_ptr->global_pause = true;
++		if(state.sound_ptr->effect_sound.has_value()) {
++			ma_sound_stop(&*state.sound_ptr->effect_sound);
++		}
++		if(state.sound_ptr->interface_sound.has_value()) {
++			ma_sound_stop(&*state.sound_ptr->interface_sound);
++		}
++		if(state.sound_ptr->music.has_value()) {
++			ma_sound_stop(&*state.sound_ptr->music);
++		}
++	}
++}
++void resume_all(sys::state& state) {
++	if(state.sound_ptr.get()) {
++		state.sound_ptr->global_pause = false;
++		if(state.sound_ptr->effect_sound.has_value()) {
++			ma_sound_start(&*state.sound_ptr->effect_sound);
++		}
++		if(state.sound_ptr->interface_sound.has_value()) {
++			ma_sound_start(&*state.sound_ptr->interface_sound);
++		}
++		if(state.sound_ptr->music.has_value()) {
++			ma_sound_start(&*state.sound_ptr->music);
++		}
++	}
++}
++
++void update_music_track(sys::state& state) {
++	if(state.sound_ptr->music_finished()) {
++		state.sound_ptr->play_new_track(state);
++	}
++}
++
++// returns the default click sound -- expect this list of functions to expand as
++//    we implement more of the fixed sound effects
++audio_instance& get_click_sound(sys::state& state) {
++	return state.sound_ptr->click_sound;
++}
++audio_instance& get_click_left_sound(sys::state& state) {
++	return state.sound_ptr->click_left_sound;
++}
++audio_instance& get_click_right_sound(sys::state& state) {
++	return state.sound_ptr->click_right_sound;
++}
++audio_instance& get_tab_budget_sound(sys::state& state) {
++	return state.sound_ptr->tab_budget_sound;
++}
++audio_instance& get_hover_sound(sys::state& state) {
++	return state.sound_ptr->hover_sound;
++}
++audio_instance& get_checkbox_sound(sys::state& state) {
++	return state.sound_ptr->checkbox_sound;
++}
++audio_instance& get_enact_sound(sys::state& state) {
++	return state.sound_ptr->enact_sound;
++}
++audio_instance& get_subtab_sound(sys::state& state) {
++	return state.sound_ptr->subtab_sound;
++}
++audio_instance& get_delete_sound(sys::state& state) {
++	return state.sound_ptr->delete_sound;
++}
++audio_instance& get_autochoose_sound(sys::state& state) {
++	return state.sound_ptr->autochoose_sound;
++}
++audio_instance& get_tab_politics_sound(sys::state& state) {
++	return state.sound_ptr->tab_politics_sound;
++}
++audio_instance& get_tab_diplomacy_sound(sys::state& state) {
++	return state.sound_ptr->tab_diplomacy_sound;
++}
++audio_instance& get_tab_military_sound(sys::state& state) {
++	return state.sound_ptr->tab_military_sound;
++}
++audio_instance& get_tab_population_sound(sys::state& state) {
++	return state.sound_ptr->tab_population_sound;
++}
++audio_instance& get_tab_production_sound(sys::state& state) {
++	return state.sound_ptr->tab_production_sound;
++}
++audio_instance& get_tab_technology_sound(sys::state& state) {
++	return state.sound_ptr->tab_technology_sound;
++}
++audio_instance& get_army_select_sound(sys::state& state) {
++	return state.sound_ptr->army_select_sound;
++}
++audio_instance& get_army_move_sound(sys::state& state) {
++	return state.sound_ptr->army_move_sound;
++}
++audio_instance& get_navy_select_sound(sys::state& state) {
++	return state.sound_ptr->navy_select_sound;
++}
++audio_instance& get_navy_move_sound(sys::state& state) {
++	return state.sound_ptr->navy_move_sound;
++}
++audio_instance& get_error_sound(sys::state& state) {
++	return state.sound_ptr->error_sound;
++}
++audio_instance& get_peace_sound(sys::state& state) {
++	return state.sound_ptr->peace_sound;
++}
++audio_instance& get_army_built_sound(sys::state& state) {
++	return state.sound_ptr->army_built_sound;
++}
++audio_instance& get_navy_built_sound(sys::state& state) {
++	return state.sound_ptr->navy_built_sound;
++}
++audio_instance& get_declaration_of_war_sound(sys::state& state) {
++	return state.sound_ptr->declaration_of_war_sound;
++}
++audio_instance& get_technology_finished_sound(sys::state& state) {
++	return state.sound_ptr->technology_finished_sound;
++}
++audio_instance& get_factory_built_sound(sys::state& state) {
++	return state.sound_ptr->factory_built_sound;
++}
++audio_instance& get_election_sound(sys::state& state) {
++	return state.sound_ptr->election_sound;
++}
++audio_instance& get_revolt_sound(sys::state& state) {
++	return state.sound_ptr->revolt_sound;
++}
++audio_instance& get_fort_built_sound(sys::state& state) {
++	return state.sound_ptr->fort_built_sound;
++}
++audio_instance& get_railroad_built_sound(sys::state& state) {
++	return state.sound_ptr->railroad_built_sound;
++}
++audio_instance& get_naval_base_built_sound(sys::state& state) {
++	return state.sound_ptr->naval_base_built_sound;
++}
++audio_instance& get_minor_event_sound(sys::state& state) {
++	return state.sound_ptr->minor_event_sound;
++}
++audio_instance& get_major_event_sound(sys::state& state) {
++	return state.sound_ptr->major_event_sound;
++}
++audio_instance& get_decline_sound(sys::state& state) {
++	return state.sound_ptr->decline_sound;
++}
++audio_instance& get_accept_sound(sys::state& state) {
++	return state.sound_ptr->accept_sound;
++}
++audio_instance& get_diplomatic_request_sound(sys::state& state) {
++	return state.sound_ptr->diplomatic_request_sound;
++}
++audio_instance& get_chat_message_sound(sys::state& state) {
++	return state.sound_ptr->chat_message_sound;
++}
++audio_instance& get_console_open_sound(sys::state& state) {
++	return state.sound_ptr->console_open_sound;
++}
++audio_instance& get_console_close_sound(sys::state& state) {
++	return state.sound_ptr->console_close_sound;
++}
++
++audio_instance& get_event_sound(sys::state& state) {
++	return state.sound_ptr->event_sound;
++}
++audio_instance& get_decision_sound(sys::state& state) {
++	return state.sound_ptr->decision_sound;
++}
++audio_instance& get_pause_sound(sys::state& state) {
++	return state.sound_ptr->pause_sound;
++}
++audio_instance& get_unpause_sound(sys::state& state) {
++	return state.sound_ptr->unpause_sound;
++}
++audio_instance& get_enemycapitulated_sound(sys::state& state) {
++	return state.sound_ptr->enemycapitulated;
++}
++audio_instance& get_wecapitulated_sound(sys::state& state) {
++	return state.sound_ptr->wecapitulated;
++}
++
++audio_instance& get_random_land_battle_sound(sys::state& state) {
++	return state.sound_ptr->land_battle_sounds[int32_t(std::rand() % 6)];
++}
++audio_instance& get_random_naval_battle_sound(sys::state& state) {
++	return state.sound_ptr->naval_battle_sounds[int32_t(std::rand() % 6)];
++}
++audio_instance& get_random_province_select_sound(sys::state& state) {
++	return state.sound_ptr->province_select_sounds[int32_t(std::rand() % 4)];
++}
++
++void play_new_track(sys::state& state) {
++	state.sound_ptr->play_new_track(state);
++}
++void play_next_track(sys::state& state) {
++	state.sound_ptr->play_next_track(state);
++}
++void play_previous_track(sys::state& state) {
++	state.sound_ptr->play_previous_track(state);
++}
++
++native_string get_current_track_name(sys::state& state) {
++	if(state.sound_ptr->music.has_value())
++		return state.sound_ptr->music_list[state.sound_ptr->current_music].filename;
++	return "";
++}
++
++} // namespace sound
+diff --git a/src/text/fonts.cpp b/src/text/fonts.cpp
+index 1a867fd..0274628 100644
+--- a/src/text/fonts.cpp
++++ b/src/text/fonts.cpp
+@@ -12,6 +12,11 @@
+ #include "constants.hpp"
+ #ifdef _WIN32
+ #include <icu.h>
++#elif defined(__ANDROID__)
++#include <unicode/ubrk.h>
++#include <unicode/utypes.h>
++// unicode/ubidi.h nao existe no NDK -- ver icu_android_compat.hpp
++#include "icu_android_compat.hpp"
+ #else
+ #include <unicode/ubrk.h>
+ #include <unicode/utypes.h>
+@@ -441,6 +446,13 @@ void font_manager::change_locale(sys::state& state, dcon::locale_id l) {
+ 	}
+ 
+ 	{
++#ifdef __ANDROID__
++		// ubrk_getBinaryRules nao existe no NDK -- guarda [tipo][locale] pro
++		// ubrk_openBinaryRules() do icu_android_compat.hpp decodificar depois.
++		state.font_collection.compiled_ubrk_rules.clear();
++		state.font_collection.compiled_ubrk_rules.push_back(uint8_t(UBRK_LINE));
++		state.font_collection.compiled_ubrk_rules.insert(state.font_collection.compiled_ubrk_rules.end(), lang_str.begin(), lang_str.end());
++#else
+ 		UErrorCode errorCode = U_ZERO_ERROR;
+ 		UBreakIterator* lb_it = ubrk_open(UBreakIteratorType::UBRK_LINE, lang_str.c_str(), nullptr, 0, &errorCode);
+ 		if(!lb_it || !U_SUCCESS(errorCode)) {
+@@ -455,8 +467,14 @@ void font_manager::change_locale(sys::state& state, dcon::locale_id l) {
+ 		ubrk_getBinaryRules(lb_it, state.font_collection.compiled_ubrk_rules.data(), rule_size, &errorCode);
+ 
+ 		ubrk_close(lb_it);
++#endif
+ 	}
+ 	{
++#ifdef __ANDROID__
++		state.font_collection.compiled_char_ubrk_rules.clear();
++		state.font_collection.compiled_char_ubrk_rules.push_back(uint8_t(UBRK_CHARACTER));
++		state.font_collection.compiled_char_ubrk_rules.insert(state.font_collection.compiled_char_ubrk_rules.end(), lang_str.begin(), lang_str.end());
++#else
+ 		UErrorCode errorCode = U_ZERO_ERROR;
+ 		UBreakIterator* ch_it = ubrk_open(UBreakIteratorType::UBRK_CHARACTER, lang_str.c_str(), nullptr, 0, &errorCode);
+ 		if(!ch_it || !U_SUCCESS(errorCode)) {
+@@ -471,8 +489,14 @@ void font_manager::change_locale(sys::state& state, dcon::locale_id l) {
+ 		ubrk_getBinaryRules(ch_it, state.font_collection.compiled_char_ubrk_rules.data(), rule_size, &errorCode);
+ 
+ 		ubrk_close(ch_it);
++#endif
+ 	}
+ 	{
++#ifdef __ANDROID__
++		state.font_collection.compiled_word_ubrk_rules.clear();
++		state.font_collection.compiled_word_ubrk_rules.push_back(uint8_t(UBRK_WORD));
++		state.font_collection.compiled_word_ubrk_rules.insert(state.font_collection.compiled_word_ubrk_rules.end(), lang_str.begin(), lang_str.end());
++#else
+ 		UErrorCode errorCode = U_ZERO_ERROR;
+ 		UBreakIterator* ch_it = ubrk_open(UBreakIteratorType::UBRK_WORD, lang_str.c_str(), nullptr, 0, &errorCode);
+ 		if(!ch_it || !U_SUCCESS(errorCode)) {
+@@ -487,6 +511,7 @@ void font_manager::change_locale(sys::state& state, dcon::locale_id l) {
+ 		ubrk_getBinaryRules(ch_it, state.font_collection.compiled_word_ubrk_rules.data(), rule_size, &errorCode);
+ 
+ 		ubrk_close(ch_it);
++#endif
+ 	}
+ 
+ 	state.load_locale_strings(localename_sv);
+diff --git a/src/text/icu_android_compat.hpp b/src/text/icu_android_compat.hpp
+new file mode 100644
+index 0000000..4752078
+--- /dev/null
++++ b/src/text/icu_android_compat.hpp
+@@ -0,0 +1,91 @@
++// icu_android_compat.hpp
++//
++// A API publica do ICU4C exposta pelo NDK (Android 12 / API 31+, NDK r22b+)
++// e so um SUBCONJUNTO do ICU4C completo. Dois buracos relevantes pro Alice:
++//
++//  1) <unicode/ubidi.h> inteiro nao existe no NDK -- bidi (texto arabe/hebraico
++//     da direita pra esquerda) nao tem equivalente nenhum la.
++//     TODO (pos-Fase 1): dar suporte a RTL de verdade no Android, seja
++//     vendorizando um algoritmo de bidi (ex. um port leve do algoritmo Unicode
++//     BiDi, tipo fribidi) ou outra fonte de ICU completo. Por enquanto o stub
++//     abaixo sempre trata o texto como uma unica run LTR -- jogos com locale
++//     RTL (arabe, hebraico) vao ficar com o texto na ordem visual errada no
++//     Android ate isso ser resolvido.
++//
++//  2) ubrk_openBinaryRules()/ubrk_getBinaryRules() nao existem no NDK (o Alice
++//     usa isso pra pre-compilar as regras de quebra de linha/palavra/char uma
++//     vez e reusar). O ubrk_open() comum (que abre a partir de um locale) esse
++//     sim existe -- entao aqui a gente reaproveita os MESMOS vetores
++//     compiled_ubrk_rules/compiled_char_ubrk_rules/compiled_word_ubrk_rules
++//     (ver fonts.hpp) só que, no Android, em vez de bytes de regra compilada,
++//     eles guardam [1 byte de UBreakIteratorType][bytes do locale em UTF-8].
++//     ubrk_openBinaryRules() abaixo decodifica isso e chama ubrk_open() de verdade.
++#pragma once
++
++#ifdef __ANDROID__
++
++#include <cstring>
++#include <cstdint>
++
++// ---- bidi: sempre uma unica run LTR (RTL desligado por enquanto) ----
++
++using UBiDiLevel = uint8_t;
++enum UBiDiDirection { UBIDI_LTR = 0, UBIDI_RTL = 1, UBIDI_MIXED = 2, UBIDI_NEUTRAL = 3 };
++
++struct UBiDi {
++	int32_t text_length = 0;
++};
++
++inline UBiDi* ubidi_open() {
++	return new UBiDi();
++}
++
++inline UBiDi* ubidi_openSized(int32_t /*maxLength*/, int32_t /*maxRunCount*/, UErrorCode* pErrorCode) {
++	*pErrorCode = U_ZERO_ERROR;
++	return new UBiDi();
++}
++
++inline void ubidi_close(UBiDi* bidi) {
++	delete bidi;
++}
++
++inline void ubidi_setPara(UBiDi* bidi, const UChar* /*text*/, int32_t length, UBiDiLevel /*paraLevel*/,
++		UBiDiLevel* /*embeddingLevels*/, UErrorCode* pErrorCode) {
++	// TODO (pos-Fase 1): respeitar paraLevel/locale_get_native_rtl uma vez que
++	// exista suporte a bidi no Android -- por enquanto sempre LTR.
++	bidi->text_length = length;
++	*pErrorCode = U_ZERO_ERROR;
++}
++
++inline int32_t ubidi_countRuns(UBiDi* /*bidi*/, UErrorCode* pErrorCode) {
++	*pErrorCode = U_ZERO_ERROR;
++	return 1; // uma unica run, sempre
++}
++
++inline UBiDiDirection ubidi_getVisualRun(UBiDi* bidi, int32_t /*runIndex*/, int32_t* logicalStart, int32_t* length) {
++	*logicalStart = 0;
++	*length = bidi->text_length;
++	return UBIDI_LTR;
++}
++
++// ---- ubrk_openBinaryRules: decodifica [tipo][locale] e chama ubrk_open() ----
++
++inline UBreakIterator* ubrk_openBinaryRules(const uint8_t* binaryRules, int32_t rulesLength,
++		const UChar* text, int32_t textLength, UErrorCode* status) {
++	if(rulesLength < 1) {
++		*status = U_ILLEGAL_ARGUMENT_ERROR;
++		return nullptr;
++	}
++	auto type = UBreakIteratorType(binaryRules[0]);
++	// bytes seguintes = locale em UTF-8/ASCII (sempre é, ver fonts.cpp) -- precisa
++	// de um char* terminado em zero pro ubrk_open, entao copia pra um buffer local
++	char locale_buf[64] = {};
++	int32_t locale_len = rulesLength - 1;
++	if(locale_len >= int32_t(sizeof(locale_buf)))
++		locale_len = int32_t(sizeof(locale_buf)) - 1;
++	std::memcpy(locale_buf, binaryRules + 1, size_t(locale_len));
++	locale_buf[locale_len] = '\0';
++	return ubrk_open(type, locale_buf, text, textLength, status);
++}
++
++#endif // __ANDROID__
+diff --git a/src/text/text.cpp b/src/text/text.cpp
+index 9a15b6d..e95fc96 100644
+--- a/src/text/text.cpp
++++ b/src/text/text.cpp
+@@ -8,6 +8,11 @@
+ #include <type_traits>
+ #ifdef _WIN32
+ #include <icu.h>
++#elif defined(__ANDROID__)
++#include <unicode/ubrk.h>
++#include <unicode/utypes.h>
++// unicode/ubidi.h nao existe no NDK -- ver icu_android_compat.hpp
++#include "icu_android_compat.hpp"
+ #else
+ #include <unicode/ubrk.h>
+ #include <unicode/utypes.h>
+diff --git a/src/window/window.hpp b/src/window/window.hpp
+index a6d73da..fe5e6ef 100644
+--- a/src/window/window.hpp
++++ b/src/window/window.hpp
+@@ -64,6 +64,29 @@ public:
+ 	bool left_mouse_down = false;
+ };
+ } // namespace window
++#elif defined(__ANDROID__)
++struct ANativeWindow;
++typedef void* EGLDisplay;
++typedef void* EGLSurface;
++typedef void* EGLContext;
++
++namespace window {
++class window_data_impl {
++public:
++	win32_text_services text_services;
++	// preenchidos em window_android.cpp a partir do android_app (Fase 4)
++	ANativeWindow* native_window = nullptr;
++	EGLDisplay egl_display = nullptr;
++	EGLSurface egl_surface = nullptr;
++	EGLContext egl_context = nullptr;
++
++	int32_t creation_x_size = 600;
++	int32_t creation_y_size = 400;
++
++	bool in_fullscreen = true; // sempre fullscreen em Android
++	bool left_mouse_down = false;
++};
++} // namespace window
+ #else
+ struct GLFWwindow;
+ 
+diff --git a/src/window/window_android.cpp b/src/window/window_android.cpp
+new file mode 100644
+index 0000000..c6cbf3e
+--- /dev/null
++++ b/src/window/window_android.cpp
+@@ -0,0 +1,89 @@
++// window_android.cpp
++//
++// Implementacao Android da interface declarada em window.hpp -- sem GLFW.
++// A janela/superficie real (ANativeWindow + EGL) e criada a partir dos
++// callbacks do android_native_app_glue (APP_CMD_INIT_WINDOW etc.), entao a
++// maior parte das funcoes abaixo so pode ser preenchida de verdade na Fase 4
++// (NativeActivity/GameActivity), quando existir um android_app* pra consultar.
++// Por enquanto isso so precisa COMPILAR e dar pra Fase 1.4 rodar o primeiro
++// build; as funcoes marcadas com TODO nao fazem nada util ainda.
++
++#include "window.hpp"
++#include "system_state.hpp"
++
++#include <android/log.h>
++
++namespace window {
++
++int32_t cursor_blink_ms() {
++	return 1000; // igual ao valor fixo usado em window_nix.cpp
++}
++int32_t double_click_ms() {
++	return 500; // igual ao valor fixo usado em window_nix.cpp
++}
++
++bool is_key_depressed(sys::state const& game_state, sys::virtual_key key) {
++	// TODO (Fase 4): mapear eventos de toque/teclado do android_app pra sys::virtual_key.
++	// A maioria das teclas nem se aplica em touchscreen -- ver Fase 4 no plano.
++	return false;
++}
++
++void get_window_size(sys::state const& game_state, int& width, int& height) {
++	// TODO (Fase 4): ler de ANativeWindow_getWidth/Height do win_ptr->native_window.
++	width = game_state.win_ptr ? game_state.win_ptr->creation_x_size : 0;
++	height = game_state.win_ptr ? game_state.win_ptr->creation_y_size : 0;
++}
++
++bool is_in_fullscreen(sys::state const& game_state) {
++	return true; // no Android o jogo sempre ocupa a tela toda
++}
++
++void set_borderless_full_screen(sys::state& game_state, bool fullscreen) {
++	// no-op: no Android nao existe "janela" pra alternar -- sempre fullscreen
++}
++
++void close_window(sys::state& game_state) {
++	// TODO (Fase 4): sinalizar pro android_main encerrar o loop principal
++	// (equivalente ao glfwSetWindowShouldClose da versao nix).
++}
++
++void create_window(sys::state& game_state, creation_parameters const& params) {
++	// TODO (Fase 4): so pode ser implementado de verdade dentro do android_main,
++	// depois de receber APP_CMD_INIT_WINDOW com o ANativeWindow valido, e apos
++	// criar o contexto EGL (ver opengl_wrapper_android.cpp).
++	// Preenchera game_state.win_ptr->native_window / egl_display / egl_surface / egl_context.
++	__android_log_print(ANDROID_LOG_ERROR, "Alice",
++			"create_window ainda nao implementado (Fase 4)");
++}
++
++void change_cursor(sys::state& state, cursor_type type) {
++	// no-op -- nao ha cursor de mouse em touchscreen
++}
++
++void emit_error_message(std::string const& content, bool fatal) {
++	__android_log_print(fatal ? ANDROID_LOG_FATAL : ANDROID_LOG_ERROR, "Alice", "%s", content.c_str());
++	if(fatal) {
++		std::abort(); // std::exit não é seguro de dentro do processo do app Android
++	}
++}
++
++// text services (IME) -- mesmos no-ops usados em window_nix.cpp; entrada de texto
++// no Android sera tratada via android_app / soft keyboard, nao por essa interface COM do Windows.
++win32_text_services::win32_text_services() { }
++win32_text_services::~win32_text_services() { }
++void win32_text_services::start_text_services() { }
++void win32_text_services::end_text_services() { }
++void win32_text_services::on_text_change(text_services_object* ts, uint32_t old_start, uint32_t old_end, uint32_t new_end) { }
++void win32_text_services::on_selection_change(text_services_object* ts) { }
++bool win32_text_services::send_mouse_event_to_tso(text_services_object* ts, int32_t x, int32_t y, uint32_t buttons) {
++	return false;
++}
++void win32_text_services::set_focus(sys::state& win, text_services_object* o) { }
++void win32_text_services::suspend_keystroke_handling() { }
++void win32_text_services::resume_keystroke_handling() { }
++text_services_object* win32_text_services::create_text_service_object(sys::state& win, ui::element_base& ei) {
++	return nullptr;
++}
++void release_text_services_object(text_services_object* ptr) { }
++
++} // namespace window
