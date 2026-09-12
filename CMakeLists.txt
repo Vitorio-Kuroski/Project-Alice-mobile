@@ -13,6 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(CTest)
+include(cmake/AliceHostTools.cmake)
 
 add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 
@@ -262,6 +263,17 @@ add_executable(AliceExtra WIN32 EXCLUDE_FROM_ALL
 	${ALICE_INCREMENTAL_SOURCES_LIST}
 	"${PROJECT_SOURCE_DIR}/src/alice.rc"
 	${ASSET_FILES})
+elseif(ANDROID)
+# Android espera uma biblioteca compartilhada (.so) carregada via JNI/NativeActivity,
+# nao um executavel -- ela e empacotada dentro do APK no projeto Gradle (Fase 5)
+add_library(Alice SHARED
+	${ALICE_SOURCE_BLOB}
+	${ALICE_CORE_SOURCES_LIST}
+	${ASSET_FILES})
+add_library(AliceIncremental SHARED EXCLUDE_FROM_ALL
+	${ALICE_SOURCE_BLOB}
+	${ALICE_INCREMENTAL_SOURCES_LIST}
+	${ASSET_FILES})
 else()
 add_executable(Alice WIN32
 	${ALICE_SOURCE_BLOB}
@@ -300,8 +312,15 @@ endif()
 
 # Include sub-projects.
 add_subdirectory(dependencies EXCLUDE_FROM_ALL)
-add_subdirectory(ParserGenerator EXCLUDE_FROM_ALL)
-add_subdirectory(FifInterfaceGenerator EXCLUDE_FROM_ALL)
+if(CMAKE_CROSSCOMPILING)
+	# ParserGenerator/DCONINTERFACEGEN rodam durante o build (geram .hpp) --
+	# nao dá pra compilá-los com o toolchain do NDK. Ver cmake/AliceHostTools.cmake.
+	alice_import_host_tool(ParserGenerator)
+	alice_import_host_tool(DCONINTERFACEGEN)
+else()
+	add_subdirectory(ParserGenerator EXCLUDE_FROM_ALL)
+	add_subdirectory(FifInterfaceGenerator EXCLUDE_FROM_ALL)
+endif()
 
 add_library(AliceCommon INTERFACE)
 target_compile_definitions(AliceCommon INTERFACE GLM_ENABLE_EXPERIMENTAL)
@@ -442,6 +461,11 @@ if (WIN32)
 	target_link_libraries(AliceCommon INTERFACE ws2_32)
 	target_link_libraries(AliceCommon INTERFACE wsock32)
 	target_link_libraries(AliceCommon INTERFACE Imm32)
+elseif(ANDROID)
+	target_link_libraries(AliceCommon INTERFACE dependency_tbb)
+	# sem glfw aqui -- ver dependencies/CMakeLists.txt e src/window/window_android.cpp
+	target_link_libraries(AliceCommon INTERFACE miniaudio)
+	target_link_libraries(AliceCommon INTERFACE dependency_icu)
 else()
 	target_link_libraries(AliceCommon INTERFACE dependency_tbb)
 	target_link_libraries(AliceCommon INTERFACE glfw)
@@ -699,6 +723,10 @@ if(WIN32)
 	add_subdirectory(SaveEditor EXCLUDE_FROM_ALL)
 	add_subdirectory(DbgAlice EXCLUDE_FROM_ALL)
 endif()
+if(NOT ANDROID)
+# O Launcher desktop (selecao de mods/pasta do jogo) tambem inclui GLFW direto
+# (src/launcher/launcher_main_nix.cpp) -- fica de fora do Android por enquanto;
+# uma tela equivalente no proprio app Android e coisa pra Fase 5.
 add_subdirectory(Launcher)
 
 add_dependencies(launch_alice GENERATE_CONTAINER ParserGenerator)
@@ -706,9 +734,10 @@ add_dependencies(launch_alice GENERATE_CONTAINERIFACE)
 add_dependencies(launch_alice GENERATE_CONTAINER_LUA)
 add_dependencies(launch_alice GENERATE_CONTAINER_OOS)
 add_dependencies(launch_alice GENERATE_PARSERS)
+endif()
 
 # Installation
-if(NOT WIN32)
+if(NOT WIN32 AND NOT ANDROID)
 	install(TARGETS Alice launch_alice
 		RUNTIME DESTINATION bin
 		LIBRARY DESTINATION lib
