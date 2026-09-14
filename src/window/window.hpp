@@ -64,6 +64,29 @@ public:
 	bool left_mouse_down = false;
 };
 } // namespace window
+#elif defined(__ANDROID__)
+struct ANativeWindow;
+typedef void* EGLDisplay;
+typedef void* EGLSurface;
+typedef void* EGLContext;
+
+namespace window {
+class window_data_impl {
+public:
+	win32_text_services text_services;
+	// preenchidos em window_android.cpp a partir do android_app (Fase 4)
+	ANativeWindow* native_window = nullptr;
+	EGLDisplay egl_display = nullptr;
+	EGLSurface egl_surface = nullptr;
+	EGLContext egl_context = nullptr;
+
+	int32_t creation_x_size = 600;
+	int32_t creation_y_size = 400;
+
+	bool in_fullscreen = true; // sempre fullscreen em Android
+	bool left_mouse_down = false;
+};
+} // namespace window
 #else
 struct GLFWwindow;
 
