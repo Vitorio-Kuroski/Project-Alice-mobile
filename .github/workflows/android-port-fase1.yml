@@ -1,0 +1,94 @@
+name: Android port - Fase 1.4 (build de teste)
+
+# Rodar manualmente pela aba "Actions" do GitHub (botão "Run workflow").
+# Não roda em todo push de propósito -- essa etapa é iterativa (compilar, ver erro,
+# corrigir, repetir), não faz sentido disparar em todo commit ainda.
+on:
+  workflow_dispatch:
+
+env:
+  # Bump aqui se quiser testar outra versão do NDK. r27d é LTS recente e comum em CI.
+  NDK_VERSION: r27d
+  ANDROID_PLATFORM: "31" # a solução de ICU da 1.3 depende da libicu nativa (API 31+)
+
+jobs:
+  android-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Dependências de sistema exigidas só para o CONFIGURE do preset desktop passar
+      # (GLFW/GLEW checam X11/OpenGL na hora de configurar, mesmo que a gente só vá
+      # compilar as 5 ferramentas de geração de código com esse preset, não o jogo todo).
+      - name: Instalar dependências de sistema (build desktop)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build clang \
+            libgl1-mesa-dev libglvnd-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxi-dev
+
+      - name: Cache do build desktop (ferramentas de host)
+        uses: actions/cache@v4
+        with:
+          path: out/build/x64-debug-linux-clang
+          key: host-tools-${{ runner.os }}-${{ hashFiles('dependencies/**/CMakeLists.txt', 'CMakeLists.txt', 'CMakePresets.json') }}
+          restore-keys: |
+            host-tools-${{ runner.os }}-
+
+      - name: Configurar preset desktop
+        run: cmake --preset x64-debug-linux-clang
+
+      - name: Compilar as 5 ferramentas de geração de código
+        run: |
+          cmake --build out/build/x64-debug-linux-clang --target \
+            ParserGenerator DCONGENERATOR DCONINTERFACEGEN DataContainer-Lua DataContainer_OOS_Reporter \
+            -- -j$(nproc)
+
+      - name: Reunir as ferramentas numa pasta única
+        run: |
+          mkdir -p native-tools
+          find out/build/x64-debug-linux-clang -type f \
+            \( -name ParserGenerator -o -name DCONGENERATOR -o -name DCONINTERFACEGEN \
+               -o -name DataContainer-Lua -o -name DataContainer_OOS_Reporter \) \
+            -exec cp {} native-tools/ \;
+          echo "Ferramentas encontradas:"
+          ls -la native-tools/
+
+      - name: Instalar o NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          local-cache: true
+
+      - name: Cache do build Android
+        uses: actions/cache@v4
+        with:
+          path: out/build/android-arm64
+          key: android-build-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ hashFiles('dependencies/**/CMakeLists.txt', 'CMakeLists.txt', 'CMakePresets.json') }}
+          restore-keys: |
+            android-build-${{ runner.os }}-${{ env.NDK_VERSION }}-
+
+      - name: Configurar preset Android
+        env:
+          ANDROID_NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cmake --preset android-arm64 -DALICE_NATIVE_TOOLS_DIR="${{ github.workspace }}/native-tools"
+
+      # -k0 (keep going) para o ninja não parar no primeiro erro -- assim um único
+      # run já traz vários erros de uma vez pra corrigir, em vez de um por rodada.
+      - name: Compilar para Android (arm64-v8a)
+        env:
+          ANDROID_NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          set +e
+          cmake --build out/build/android-arm64 --target Alice -- -k0 2>&1 | tee android-build.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Publicar o log do build (sempre, mesmo se falhar)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-log
+          path: android-build.log
+          retention-days: 14
