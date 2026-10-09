@@ -1,19 +1,14 @@
 // entry_point_android.cpp
 //
-// ATENCAO: placeholder. entry_point_nix.cpp (402 linhas) faz bem mais que so
-// abrir a janela -- carrega mods, monta/verifica o scenario file, parseia
-// argumentos de linha de comando (--mod, porta de multiplayer, etc.) antes de
-// finalmente chamar window::create_window(...). Portar tudo isso pro ciclo de
-// vida do Android e trabalho de verdade da Fase 4, incluindo:
-//   - usar android_native_app_glue em vez de um main() tradicional;
-//   - so criar a janela/contexto dentro do callback APP_CMD_INIT_WINDOW;
-//   - tratar APP_CMD_PAUSE/RESUME/TERM_WINDOW (o Android pode pausar ou matar
-//     o app a qualquer momento -- nao existe isso no fluxo desktop);
-//   - decidir de onde vem o "--mod"/selecao de scenario sem terminal
-//     (provavelmente uma tela propria no app, nao argv).
+// Equivalente Android do entry_point_nix.cpp. No lugar de main(), a
+// NativeActivity (via android_native_app_glue) chama android_main numa thread
+// propria; o ciclo de vida (janela, pausa, foco, destruicao) e o loop de render
+// ficam em window::run_android_main_loop (window_android.cpp).
 //
-// Por enquanto isso so faz o suficiente pra existir um android_main() valido
-// e a Fase 1.4 conseguir compilar/linkar.
+// TODO (Fase 5): o que o entry_point_nix.cpp faz antes de abrir a janela --
+// achar a pasta do jogo (add_root), selecionar/montar o arquivo de cenario e
+// carrega-lo. No Android isso vira uma tela propria (sem argv/terminal) e os
+// arquivos do Victoria 2 precisam estar acessiveis no armazenamento.
 
 #include <android_native_app_glue.h>
 #include <android/log.h>
@@ -24,21 +19,6 @@
 static sys::state game_state;
 
 void android_main(struct android_app* app) {
-	__android_log_print(ANDROID_LOG_INFO, "Alice", "android_main iniciado (entry point ainda placeholder)");
-
-	// TODO (Fase 4): loop de eventos padrao do android_native_app_glue, tratando
-	// app->onAppCmd (APP_CMD_INIT_WINDOW -> window::create_window(...), etc.)
-	// e app->onInputEvent, ate ALOOPER_POLL_ONCE indicar destruicao do app.
-	int events;
-	struct android_poll_source* source;
-	while(true) {
-		while(ALooper_pollOnce(-1, nullptr, &events, (void**)&source) >= 0) {
-			if(source != nullptr) {
-				source->process(app, source);
-			}
-			if(app->destroyRequested != 0) {
-				return;
-			}
-		}
-	}
+	__android_log_print(ANDROID_LOG_INFO, "Alice", "android_main iniciado");
+	window::run_android_main_loop(game_state, app);
 }

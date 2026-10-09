@@ -60,7 +60,9 @@ jobs:
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: ${{ env.NDK_VERSION }}
-          local-cache: true
+          # sem local-cache: o NDK restaurado do cache veio sem o clang++ (que e
+          # um link simbolico) e o configure falhou; baixar leva poucos segundos
+          local-cache: false
 
       - name: Cache do build Android
         uses: actions/cache@v4

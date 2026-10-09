@@ -66,17 +66,23 @@ public:
 } // namespace window
 #elif defined(__ANDROID__)
 struct ANativeWindow;
+struct android_app;
 typedef void* EGLDisplay;
 typedef void* EGLSurface;
 typedef void* EGLContext;
+typedef void* EGLConfig;
 
 namespace window {
 class window_data_impl {
 public:
 	win32_text_services text_services;
-	// preenchidos em window_android.cpp a partir do android_app (Fase 4)
+	// ver window_android.cpp: o contexto EGL vive enquanto o app existir; a
+	// superficie (ANativeWindow) e criada/destruida a cada APP_CMD_INIT_WINDOW /
+	// APP_CMD_TERM_WINDOW (app em segundo plano, tela desligada etc.)
+	android_app* app = nullptr;
 	ANativeWindow* native_window = nullptr;
 	EGLDisplay egl_display = nullptr;
+	EGLConfig egl_config = nullptr;
 	EGLSurface egl_surface = nullptr;
 	EGLContext egl_context = nullptr;
 
@@ -85,7 +91,15 @@ public:
 
 	bool in_fullscreen = true; // sempre fullscreen em Android
 	bool left_mouse_down = false;
+
+	bool resumed = false;      // entre APP_CMD_RESUME e APP_CMD_PAUSE
+	bool has_focus = false;    // entre APP_CMD_GAINED_FOCUS e APP_CMD_LOST_FOCUS
+	bool game_started = false; // on_create ja rodou (Fase 5: carregar o cenario)
 };
+
+// Ponto de entrada do loop principal no Android, chamado pelo android_main
+// (entry_point_android.cpp). So retorna quando o app e destruido.
+void run_android_main_loop(sys::state& game_state, android_app* app);
 } // namespace window
 #else
 struct GLFWwindow;
