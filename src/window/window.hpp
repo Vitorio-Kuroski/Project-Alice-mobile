@@ -94,12 +94,22 @@ public:
 
 	bool resumed = false;      // entre APP_CMD_RESUME e APP_CMD_PAUSE
 	bool has_focus = false;    // entre APP_CMD_GAINED_FOCUS e APP_CMD_LOST_FOCUS
-	bool game_started = false; // on_create ja rodou (Fase 5: carregar o cenario)
+	bool game_started = false; // android_start_game ja rodou (on_create etc.)
+	bool loading = false;      // cenario sendo carregado/montado (tela de espera)
 };
 
 // Ponto de entrada do loop principal no Android, chamado pelo android_main
 // (entry_point_android.cpp). So retorna quando o app e destruido.
 void run_android_main_loop(sys::state& game_state, android_app* app);
+
+// Implementado em entry_point_android.cpp: chamado a cada volta do loop
+// principal (com ou sem superficie) para avancar a extracao dos arquivos,
+// a escolha da pasta do jogo e o carregamento do cenario.
+void android_launcher_update(sys::state& game_state);
+
+// Com o cenario carregado e uma superficie EGL ativa: inicia OpenGL, som e o
+// on_create (o final do create_window de window_nix.cpp).
+void android_start_game(sys::state& game_state);
 } // namespace window
 #else
 struct GLFWwindow;

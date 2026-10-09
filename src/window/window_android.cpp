@@ -213,11 +213,8 @@ void on_window_created(sys::state& state, ANativeWindow* native_window) {
 	}
 
 	update_window_size(state);
-
-	// TODO (Fase 5): com os arquivos do jogo disponiveis, na primeira janela:
-	//   ogl::initialize_opengl(state); sound::initialize_sound_system(state);
-	//   state.on_create(); win.game_started = true;
-	// (o equivalente ao trecho final do create_window de window_nix.cpp)
+	// o jogo em si e iniciado pelo android_launcher_update quando o cenario
+	// estiver carregado (ver android_start_game)
 }
 
 void handle_cmd(android_app* app, int32_t cmd) {
@@ -258,7 +255,7 @@ void handle_cmd(android_app* app, int32_t cmd) {
 		win.resumed = false;
 		break;
 	case APP_CMD_SAVE_STATE:
-		// TODO (Fase 5): autosave -- o Android pode matar o app em segundo plano
+		// TODO: autosave -- o Android pode matar o app em segundo plano
 		break;
 	case APP_CMD_DESTROY:
 		ALICE_LOGI("APP_CMD_DESTROY");
@@ -683,7 +680,12 @@ int32_t handle_input(android_app* app, AInputEvent* event) {
 // testar o toque no aparelho. Fundo clareia/escurece com a pinca; quadrado
 // branco = dedo arrastando, amarelo = toque (clique), vermelho = segurar (clique direito).
 void render_touch_placeholder(sys::state& state) {
-	float const z = touch.placeholder_zoom / 10.f; // -1..1
+	float z = touch.placeholder_zoom / 10.f; // -1..1
+	if(state.win_ptr->loading) {
+		// carregando: o fundo "respira" para mostrar que o app nao travou
+		auto const ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+		z += 0.5f * std::sin(float(ms % 2000) / 2000.f * 6.2831853f);
+	}
 	glViewport(0, 0, state.x_size, state.y_size);
 	glDisable(GL_SCISSOR_TEST);
 	glClearColor(0.11f + 0.08f * z, 0.20f + 0.10f * z, 0.33f + 0.12f * z, 1.0f);
@@ -747,6 +749,28 @@ void render_frame(sys::state& state) {
 
 } // namespace
 
+void android_start_game(sys::state& state) {
+	auto& win = *state.win_ptr;
+	assert(win.egl_surface != EGL_NO_SURFACE && !win.game_started);
+	ALICE_LOGI("iniciando o jogo (OpenGL, som, on_create)");
+
+	ogl::initialize_opengl(state);
+
+	sound::initialize_sound_system(state);
+	sound::start_music(state, state.user_settings.master_volume * state.user_settings.music_volume);
+
+	// equivalente ao on_window_change inicial do window_nix.cpp
+	int32_t const width = ANativeWindow_getWidth(win.native_window);
+	int32_t const height = ANativeWindow_getHeight(win.native_window);
+	state.on_resize(width, height, window_state::maximized);
+	state.x_size = width;
+	state.y_size = height;
+
+	state.on_create();
+	win.loading = false;
+	win.game_started = true;
+}
+
 void run_android_main_loop(sys::state& game_state, android_app* app) {
 	game_state.win_ptr = std::make_unique<window_data_impl>();
 	auto& win = *game_state.win_ptr;
@@ -771,6 +795,8 @@ void run_android_main_loop(sys::state& game_state, android_app* app) {
 		}
 		if(app->destroyRequested)
 			break;
+
+		android_launcher_update(game_state);
 
 		if(can_render(win)) {
 			update_touch(game_state);
