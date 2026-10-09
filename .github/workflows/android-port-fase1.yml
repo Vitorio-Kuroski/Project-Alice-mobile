@@ -1,4 +1,4 @@
-name: Android port - Fase 1.4 (build de teste)
+name: Android port - build do APK (arm64-v8a)
 
 # Rodar manualmente pela aba "Actions" do GitHub (botão "Run workflow").
 # Não roda em todo push de propósito -- essa etapa é iterativa (compilar, ver erro,
@@ -66,9 +66,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: out/build/android-arm64
-          key: android-build-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ hashFiles('dependencies/**/CMakeLists.txt', 'CMakeLists.txt', 'CMakePresets.json') }}
+          key: android-build-v2-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ hashFiles('dependencies/**/CMakeLists.txt', 'CMakeLists.txt', 'CMakePresets.json') }}
           restore-keys: |
-            android-build-${{ runner.os }}-${{ env.NDK_VERSION }}-
+            android-build-v2-${{ runner.os }}-${{ env.NDK_VERSION }}-
 
       - name: Configurar preset Android
         env:
@@ -86,11 +86,27 @@ jobs:
           cmake --build out/build/android-arm64 --target Alice -- -k0 2>&1 | tee android-build.log
           exit ${PIPESTATUS[0]}
 
-      - name: Publicar a libAlice.so
+      - name: Copiar as .so para o projeto Gradle
+        env:
+          ANDROID_NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: android/collect-native-libs.sh
+
+      - name: Instalar o JDK 17 (Android Gradle Plugin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # o Android SDK ja vem instalado no runner ubuntu-latest (ANDROID_HOME)
+      - name: Gerar o APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Publicar o APK
         uses: actions/upload-artifact@v4
         with:
-          name: libAlice-arm64-v8a
-          path: out/build/android-arm64/libAlice.so
+          name: ProjectAlice-arm64-v8a-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
 
       - name: Publicar o log do build (sempre, mesmo se falhar)

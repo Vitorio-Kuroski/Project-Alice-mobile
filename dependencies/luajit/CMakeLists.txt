@@ -41,7 +41,7 @@ else()
 
 		set(ALICE_LUAJIT_BUILD_COMMAND make
 			"CROSS=${ALICE_NDK_BIN}/aarch64-linux-android-"
-			"STATIC_CC=${ALICE_NDK_CLANG}"
+			"STATIC_CC=${ALICE_NDK_CLANG} -fPIC" # a libluajit.a e linkada dentro da libAlice.so
 			"DYNAMIC_CC=${ALICE_NDK_CLANG} -fPIC"
 			"TARGET_LD=${ALICE_NDK_CLANG}"
 			"TARGET_AR=${ALICE_NDK_BIN}/llvm-ar rcus"
@@ -71,10 +71,17 @@ else()
 		BUILD_IN_SOURCE TRUE
 		BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/luajit/source/luajit.h
 		BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/luajit/source/src/libluajit.so
+		BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/luajit/source/src/libluajit.a
 		INSTALL_COMMAND make install DESTDIR=${DESTDIR} PREFIX=<INSTALL_DIR>
 	)
 	add_library(lib_luajit INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/luajit/source/luajit.h)
 	add_dependencies(lib_luajit luajit)
-	target_link_libraries(lib_luajit INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/luajit/source/src/libluajit.so)
+	if(ANDROID)
+		# estatico no Android: a .so do LuaJIT tem soname versionado
+		# (libluajit-5.1.so.2), que o APK nao consegue empacotar/carregar
+		target_link_libraries(lib_luajit INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/luajit/source/src/libluajit.a)
+	else()
+		target_link_libraries(lib_luajit INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/luajit/source/src/libluajit.so)
+	endif()
 endif()
 
