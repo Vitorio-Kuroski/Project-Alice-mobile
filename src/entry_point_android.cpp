@@ -32,7 +32,7 @@ void android_main(struct android_app* app) {
 	int events;
 	struct android_poll_source* source;
 	while(true) {
-		while(ALooper_pollAll(-1, nullptr, &events, (void**)&source) >= 0) {
+		while(ALooper_pollOnce(-1, nullptr, &events, (void**)&source) >= 0) {
 			if(source != nullptr) {
 				source->process(app, source);
 			}

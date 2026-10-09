@@ -7,8 +7,9 @@ on:
   workflow_dispatch:
 
 env:
-  # Bump aqui se quiser testar outra versão do NDK. r27d é LTS recente e comum em CI.
-  NDK_VERSION: r27d
+  # r29 (clang/libc++ 21): o r27 (libc++ 18) nao tem std::atomic_ref nem
+  # std::from_chars para float, que o DataContainer e o fif.hpp usam.
+  NDK_VERSION: r29
   ANDROID_PLATFORM: "31" # a solução de ICU da 1.3 depende da libicu nativa (API 31+)
 
 jobs:
@@ -84,6 +85,13 @@ jobs:
           set +e
           cmake --build out/build/android-arm64 --target Alice -- -k0 2>&1 | tee android-build.log
           exit ${PIPESTATUS[0]}
+
+      - name: Publicar a libAlice.so
+        uses: actions/upload-artifact@v4
+        with:
+          name: libAlice-arm64-v8a
+          path: out/build/android-arm64/libAlice.so
+          retention-days: 14
 
       - name: Publicar o log do build (sempre, mesmo se falhar)
         if: always()
