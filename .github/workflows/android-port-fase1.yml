@@ -36,6 +36,11 @@ jobs:
           restore-keys: |
             host-tools-${{ runner.os }}-
 
+      - name: Validar os shaders (GLSL ES 3.20 e GLSL 4.60)
+        run: |
+          sudo apt-get install -y -qq glslang-tools
+          android/validate-shaders.sh
+
       - name: Configurar preset desktop
         run: cmake --preset x64-debug-linux-clang
 
