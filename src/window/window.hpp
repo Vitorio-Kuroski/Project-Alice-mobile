@@ -96,7 +96,13 @@ public:
 	bool has_focus = false;    // entre APP_CMD_GAINED_FOCUS e APP_CMD_LOST_FOCUS
 	bool game_started = false; // android_start_game ja rodou (on_create etc.)
 	bool loading = false;      // cenario sendo carregado/montado (tela de espera)
+	bool choose_ui_scale = false; // sem user_settings.dat: escolher a escala pela tela
+	std::chrono::steady_clock::time_point last_background_save{};
 };
+
+// Escala da interface para uma tela de width x height pixels com a densidade
+// dada (dpi do Android, 160 = 1x). Fica entre os valores de sys::ui_scales.
+float android_default_ui_scale(int32_t width, int32_t height, int32_t density_dpi);
 
 // Ponto de entrada do loop principal no Android, chamado pelo android_main
 // (entry_point_android.cpp). So retorna quando o app e destruido.

@@ -445,7 +445,11 @@ void run_loader() {
 	game_state.fill_unsaved_data();
 
 	network::init(game_state);
+	// sem configuracoes salvas (primeira execucao) a escala da interface e
+	// escolhida pelo tamanho/densidade da tela em window::android_start_game
+	bool const has_saved_settings = bool(simple_fs::peek_file(simple_fs::get_or_create_settings_directory(), NATIVE("user_settings.dat")));
 	game_state.load_user_settings();
+	game_state.win_ptr->choose_ui_scale = !has_saved_settings;
 	ui::populate_definitions_map(game_state);
 
 	status.store(load_status::ready);

@@ -30,6 +30,12 @@ Port para Android do [Project Alice](https://github.com/schombert/Project-Alice)
 
 A pasta escolhida fica salva. Para trocá-la, apague o arquivo `game_folder.txt` (ver [Onde ficam os arquivos](#onde-ficam-os-arquivos)) ou limpe os dados do app.
 
+Na primeira vez a **escala da interface** é escolhida pela tela do aparelho, para os botões ficarem num tamanho bom para o dedo sem que as janelas do jogo deixem de caber. Um celular comum fica com 1,5×. Dá para mudar depois nas opções do jogo.
+
+### Sair no meio da partida
+
+Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **salva** em `android_autosave.bin`, porque o Android pode fechar apps em segundo plano sem avisar. Para continuar depois, carregue esse save. O arquivo é sempre o mesmo (sobrescrito) e é gravado no máximo uma vez a cada 30 s. Só vale para o modo single-player.
+
 ### Controles
 
 | Gesto | Equivale a |
@@ -131,7 +137,7 @@ Outras decisões que valem saber:
 - **Mods:** só o jogo base; falta uma tela de seleção de mods.
 - **Digitar texto** (nome de save, chat) não funciona: a API nativa não entrega os caracteres do teclado virtual. Isso precisa de uma ponte JNI.
 - **Seleção em caixa** de várias unidades com o dedo ainda não existe; dá para selecionar uma por vez.
-- **Sem salvamento automático** ao ir para segundo plano: o Android pode descartar uma partida em andamento se precisar de memória.
+- **Retomar depois de o Android fechar o app:** o save de segundo plano é feito, mas é preciso carregá-lo manualmente pelo menu.
 - **Valores de toque** (tempo do segurar, tolerância de movimento, velocidade do zoom da pinça) são palpites a ajustar com testes.
 - **Só arm64-v8a**, build de debug assinado com a chave de debug.
 - **Memória:** texturas S3TC descomprimidas ocupam mais memória de vídeo em GPUs sem suporte a S3TC (Mali, PowerVR).

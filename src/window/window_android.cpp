@@ -217,6 +217,38 @@ void on_window_created(sys::state& state, ANativeWindow* native_window) {
 	// estiver carregado (ver android_start_game)
 }
 
+// Ao ir para segundo plano o Android pode matar o processo a qualquer momento
+// para liberar memoria, sem aviso. Entao, numa partida single-player:
+//  - pausa a simulacao como o botao de pausa faz (guarda a velocidade em
+//    held_game_speed), para o tempo do jogo nao correr com o app fora da tela;
+//  - pede um save pelo mesmo comando do menu "Salvar", que a thread do jogo
+//    executa (nada de gravar o estado daqui, com a simulacao rodando).
+// O arquivo e sempre o mesmo (sobrescrito), e no maximo um a cada 30 s.
+constexpr char const* background_save_name = "android_autosave.bin";
+constexpr auto background_save_interval = std::chrono::seconds(30);
+
+void pause_and_save_on_background(sys::state& state) {
+	auto& win = *state.win_ptr;
+	if(!win.game_started || !state.current_scene.game_in_progress)
+		return;
+	if(state.network_mode != sys::network_mode_type::single_player)
+		return; // no multiplayer o host decide pausa e saves
+	if(!state.local_player_nation)
+		return; // ex.: ainda escolhendo o pais
+
+	if(auto const speed = state.actual_game_speed.load(); speed > 0) {
+		state.ui_state.held_game_speed = speed;
+		state.actual_game_speed = 0;
+	}
+
+	auto const now = std::chrono::steady_clock::now();
+	if(now - win.last_background_save < background_save_interval)
+		return;
+	win.last_background_save = now;
+	ALICE_LOGI("indo para segundo plano: pausando e salvando em %s", background_save_name);
+	command::save_game(state, state.local_player_nation, false, background_save_name);
+}
+
 void handle_cmd(android_app* app, int32_t cmd) {
 	auto& state = *static_cast<sys::state*>(app->userData);
 	auto& win = *state.win_ptr;
@@ -253,6 +285,7 @@ void handle_cmd(android_app* app, int32_t cmd) {
 	case APP_CMD_PAUSE:
 		ALICE_LOGI("APP_CMD_PAUSE");
 		win.resumed = false;
+		pause_and_save_on_background(state);
 		break;
 	case APP_CMD_SAVE_STATE:
 		// TODO: autosave -- o Android pode matar o app em segundo plano
@@ -749,6 +782,28 @@ void render_frame(sys::state& state) {
 
 } // namespace
 
+float android_default_ui_scale(int32_t width, int32_t height, int32_t density_dpi) {
+	// A interface do Victoria 2 foi feita para pelo menos ~1024x720 pixels:
+	// com escala s, a tela "logica" e (width/s) x (height/s). Entao:
+	//  - pela densidade: s = dpi/160 (1 dp do Android = 1 pixel da interface),
+	//    o que deixa botoes e textos com tamanho fisico confortavel no dedo;
+	//  - mas sem passar da maior escala que ainda cabe 1024x720 (num celular em
+	//    paisagem e isso que limita: 1080 de altura -> no maximo 1,5).
+	int32_t const long_side = std::max(width, height);
+	int32_t const short_side = std::min(width, height);
+	float const by_density = float(density_dpi > 0 ? density_dpi : 160) / 160.f;
+	float const fits = std::min(float(long_side) / 1024.f, float(short_side) / 720.f);
+	float const target = std::min(by_density, fits);
+
+	// o maior valor da lista de opcoes que nao passa do alvo (minimo 0,75)
+	float chosen = 0.75f;
+	for(float v : sys::ui_scales) {
+		if(v <= target + 0.001f && v >= chosen)
+			chosen = v;
+	}
+	return chosen;
+}
+
 void android_start_game(sys::state& state) {
 	auto& win = *state.win_ptr;
 	assert(win.egl_surface != EGL_NO_SURFACE && !win.game_started);
@@ -762,6 +817,17 @@ void android_start_game(sys::state& state) {
 	// equivalente ao on_window_change inicial do window_nix.cpp
 	int32_t const width = ANativeWindow_getWidth(win.native_window);
 	int32_t const height = ANativeWindow_getHeight(win.native_window);
+
+	if(win.choose_ui_scale) {
+		// primeira execucao (sem user_settings.dat): escala pela tela; fica salva
+		// e pode ser mudada depois nas opcoes do jogo
+		int32_t const density = win.app->config ? AConfiguration_getDensity(win.app->config) : ACONFIGURATION_DENSITY_MEDIUM;
+		state.user_settings.ui_scale = android_default_ui_scale(width, height, density);
+		state.save_user_settings();
+		win.choose_ui_scale = false;
+		ALICE_LOGI("escala da interface: %.2f (tela %dx%d, %d dpi)", state.user_settings.ui_scale, width, height, density);
+	}
+
 	state.on_resize(width, height, window_state::maximized);
 	state.x_size = width;
 	state.y_size = height;
