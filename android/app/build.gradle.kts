@@ -48,10 +48,10 @@ android {
 
     defaultConfig {
         applicationId = "org.projectalice.mobile"
-        minSdk = 31 // a solucao de ICU usa a libicu do sistema (API 31+)
+        minSdk = 30 // Android 11; ICU: ver src/text/icu_android_compat.hpp
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.2-fase5"
+        versionCode = 2
+        versionName = "0.3"
 
         ndk {
             abiFilters += listOf("arm64-v8a")

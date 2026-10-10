@@ -8,7 +8,7 @@ Port para Android do [Project Alice](https://github.com/schombert/Project-Alice)
 
 ### Requisitos
 
-- Android 12 ou mais novo (API 31+)
+- Android 11 ou mais novo (API 30+)
 - Celular ou tablet ARM 64 bits (arm64-v8a), que é a grande maioria dos aparelhos atuais
 - GPU com OpenGL ES 3.2
 - Os arquivos do **Victoria 2 com as expansões**, copiados para o aparelho. O Project Alice não inclui o conteúdo do jogo original.
@@ -16,8 +16,8 @@ Port para Android do [Project Alice](https://github.com/schombert/Project-Alice)
 
 ### Instalação
 
-1. Baixe o APK na aba **Actions** do GitHub. Abra a execução mais recente do workflow "Android port - build do APK (arm64-v8a)" e baixe o artefato `ProjectAlice-arm64-v8a-debug-apk`.
-2. Copie a pasta do Victoria 2 para o aparelho, por exemplo para `Download/Victoria 2`. A pasta certa é a que contém `common`, `map` e `gfx`.
+1. Baixe o APK na aba **Actions** do GitHub. Abra a execução mais recente do workflow "Android port - build do APK (arm64-v8a)" e baixe o artefato `ProjectAlice-arm64-v8a-android-arm64-release-apk` (o build otimizado; o de `android-arm64` é o de debug, bem mais lento).
+2. Copie a pasta do Victoria 2 para o aparelho, por exemplo para `Jogos/Victoria 2` no armazenamento interno. A pasta certa é a que contém `common`, `map` e `gfx`. Evite a pasta `Download` e a raiz do armazenamento: o seletor de pastas do Android 11+ não permite escolher essas.
 3. Instale o APK (é preciso permitir a instalação de fontes desconhecidas) ou use `adb install app-debug.apk`.
 
 ### Primeira execução
@@ -71,11 +71,11 @@ O log mostra cada etapa: extração dos arquivos, pasta escolhida, montagem e ca
 
 ### Compilar pelo GitHub Actions
 
-O workflow `.github/workflows/android-port-fase1.yml` roda manualmente. Na aba **Actions**, escolha "Android port - build do APK (arm64-v8a)", clique em **Run workflow** e selecione a branch. Ele:
+O workflow `.github/workflows/android-port-fase1.yml` roda manualmente. Na aba **Actions**, escolha "Android port - build do APK (arm64-v8a)", clique em **Run workflow**, selecione a branch e o preset: `android-arm64-release` (padrão, otimizado, para jogar) ou `android-arm64` (debug, com asserções, para investigar erros). Ele:
 
 1. valida os shaders como GLSL ES 3.20 e GLSL 4.60 (`android/validate-shaders.sh`);
 2. compila no Linux as ferramentas que geram código durante o build;
-3. compila a `libAlice.so` para arm64-v8a com o NDK r29;
+3. compila a `libAlice.so` para arm64-v8a com o NDK r29, no preset escolhido;
 4. gera o APK com o Gradle e o publica como artefato, junto com o log do build.
 
 ### Compilar localmente
@@ -94,12 +94,12 @@ find out/build/x64-debug-linux-clang -type f \( -name ParserGenerator -o -name D
 
 # 2. a biblioteca nativa
 export ANDROID_NDK=/caminho/para/android-ndk-r29
-cmake --preset android-arm64 -DALICE_NATIVE_TOOLS_DIR=$PWD/native-tools
-cmake --build out/build/android-arm64 --target Alice
+cmake --preset android-arm64-release -DALICE_NATIVE_TOOLS_DIR=$PWD/native-tools   # ou android-arm64 (debug)
+cmake --build out/build/android-arm64-release --target Alice
 
 # 3. o APK
 export ANDROID_HOME=/caminho/para/android-sdk
-android/collect-native-libs.sh          # copia as .so para o Gradle (sem símbolos de debug)
+android/collect-native-libs.sh out/build/android-arm64-release   # copia as .so para o Gradle (sem símbolos)
 cd android && ./gradlew assembleDebug   # -> app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -127,7 +127,7 @@ O código nativo é compilado pelo CMake, não pelo Gradle. O Gradle só empacot
 Outras decisões que valem saber:
 
 - **LuaJIT** é linkado de forma estática no Android. A `.so` dele tem nome com versão (`libluajit-5.1.so.2`), que o Android não carrega de dentro do APK.
-- **ICU** vem do próprio sistema (`libicu.so`, API 31+), por isso o mínimo é Android 12.
+- **ICU:** o jogo só usa a quebra de texto do ICU (caracteres, palavras e linhas). No Android 12+ ela vem do sistema (`libicu.so`, carregada com `dlopen`). No Android 11, que não tem ICU público para apps, entra uma implementação própria em `src/text/icu_android_compat.hpp`. Comparada com o ICU nos textos de localização do Alice, ela dá a mesma quebra de linha em ~99% das frases em inglês, alemão e russo; chinês e japonês ficam aproximados.
 - **Sistema de arquivos:** é o mesmo do Linux (`simple_fs_nix.cpp`). `$HOME` aponta para a pasta externa do app, e as raízes do jogo são `[pasta do Victoria 2, pasta interna com assets/]`.
 - **Fechar o app** encerra o processo: as threads do jogo e o estado estático não podem ser reaproveitados por uma nova Activity.
 
@@ -139,6 +139,6 @@ Outras decisões que valem saber:
 - **Seleção em caixa** de várias unidades com o dedo ainda não existe; dá para selecionar uma por vez.
 - **Retomar depois de o Android fechar o app:** o save de segundo plano é feito, mas é preciso carregá-lo manualmente pelo menu.
 - **Valores de toque** (tempo do segurar, tolerância de movimento, velocidade do zoom da pinça) são palpites a ajustar com testes.
-- **Só arm64-v8a**, build de debug assinado com a chave de debug.
+- **Só arm64-v8a**, assinado com a chave de debug do Android (sem chave de release própria).
 - **Memória:** texturas S3TC descomprimidas ocupam mais memória de vídeo em GPUs sem suporte a S3TC (Mali, PowerVR).
 - **DataContainer** é baixado da branch `master` sem versão fixa, e uma mudança lá pode quebrar o build.

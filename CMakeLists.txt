@@ -444,6 +444,10 @@ else() # GCC or CLANG
 		# ARM: sem flags de vetor x86 (-march=nehalem nao existe aqui)
 		target_compile_options(AliceCommon INTERFACE
 		-fno-fast-math -ffp-model=precise -ffp-contract=off )
+		# o toolchain do NDK sempre poe -g; com -O3 o main.cpp (tudo num arquivo
+		# so) passa de 13 GB de memoria no compilador. No release os simbolos
+		# seriam removidos de qualquer jeito (android/collect-native-libs.sh).
+		target_compile_options(AliceCommon INTERFACE $<$<NOT:$<CONFIG:Debug>>:-g0>)
 	else()
 		target_compile_options(AliceCommon INTERFACE
 		-march=nehalem -fno-fast-math -ffp-model=precise -ffp-contract=off )

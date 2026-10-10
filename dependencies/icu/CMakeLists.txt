@@ -1,14 +1,11 @@
 if(ANDROID)
-	# ICU4C nativo do NDK (Android 12 / API 31+, NDK r22b+) -- sem find_package,
-	# sem compilar/vendorizar ICU. So expoe um subconjunto da API C: falta
-	# unicode/ubidi.h inteiro e ubrk_openBinaryRules/ubrk_getBinaryRules --
-	# ver src/text/icu_android_compat.hpp pros contornos.
-	find_library(ALICE_NDK_ICU_LIB icu)
-	if(NOT ALICE_NDK_ICU_LIB)
-		message(FATAL_ERROR "libicu do NDK nao encontrada -- confira se ANDROID_PLATFORM >= 31 (API 31, Android 12) no preset.")
-	endif()
+	# Nada e linkado: o app roda a partir do Android 11 (API 30) e o NDK so
+	# publica a libicu.so para apps a partir do Android 12 (API 31). Os headers
+	# <unicode/*.h> vem do sysroot do NDK; src/text/icu_android_compat.hpp
+	# carrega a libicu.so com dlopen quando existe e, no Android 11, usa uma
+	# implementacao propria da quebra de texto (a unica parte do ICU usada aqui).
 	add_library(dependency_icu INTERFACE)
-	target_link_libraries(dependency_icu INTERFACE ${ALICE_NDK_ICU_LIB})
+	target_link_libraries(dependency_icu INTERFACE dl)
 else()
 	message(STATUS "Fetching icu...")
 
