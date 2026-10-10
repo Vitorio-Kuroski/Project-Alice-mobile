@@ -440,6 +440,18 @@ else() # GCC or CLANG
 	elseif(VECTOR_MODE STREQUAL "AVX2")
 		target_compile_options(AliceCommon INTERFACE
 		-mavx2 -mfma )
+	elseif(ANDROID)
+		# ARM: sem flags de vetor x86 (-march=nehalem nao existe aqui)
+		target_compile_options(AliceCommon INTERFACE
+		-fno-fast-math -ffp-model=precise -ffp-contract=off )
+		# -mtune so muda a ordem/escolha de instrucoes para o Cortex-A76 (nucleo
+		# grande do Snapdragon 675/7xx/8xx e de muitos Dimensity/Exynos); o
+		# conjunto de instrucoes continua armv8-a, entao roda em qualquer arm64
+		target_compile_options(AliceCommon INTERFACE -mtune=cortex-a76)
+		# o toolchain do NDK sempre poe -g; com -O3 o main.cpp (tudo num arquivo
+		# so) passa de 13 GB de memoria no compilador. No release os simbolos
+		# seriam removidos de qualquer jeito (android/collect-native-libs.sh).
+		target_compile_options(AliceCommon INTERFACE $<$<NOT:$<CONFIG:Debug>>:-g0>)
 	else()
 		target_compile_options(AliceCommon INTERFACE
 		-march=nehalem -fno-fast-math -ffp-model=precise -ffp-contract=off )
@@ -451,7 +463,9 @@ endif()
 target_link_libraries(AliceCommon INTERFACE dependency_DataContainer)
 target_link_libraries(AliceCommon INTERFACE dependency_DataContainerLua)
 target_link_libraries(AliceCommon INTERFACE dependency_DataContainerOOSReporter)
-target_link_libraries(AliceCommon INTERFACE libglew_static)
+if(NOT ANDROID)
+	target_link_libraries(AliceCommon INTERFACE libglew_static)
+endif()
 target_link_libraries(AliceCommon INTERFACE stb_image)
 target_link_libraries(AliceCommon INTERFACE freetype)
 target_link_libraries(AliceCommon INTERFACE harfbuzz)
@@ -466,6 +480,17 @@ elseif(ANDROID)
 	# sem glfw aqui -- ver dependencies/CMakeLists.txt e src/window/window_android.cpp
 	target_link_libraries(AliceCommon INTERFACE miniaudio)
 	target_link_libraries(AliceCommon INTERFACE dependency_icu)
+	# intrinsecas x86 (SSE/AVX) emuladas com NEON -- ver src/x86_compat/simde_x86.h
+	target_link_libraries(AliceCommon INTERFACE dependency_simde)
+	# NativeActivity: a glue do NDK fornece o ANativeActivity_onCreate que chama android_main
+	add_library(android_native_app_glue STATIC
+		${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)
+	target_include_directories(android_native_app_glue PUBLIC
+		${ANDROID_NDK}/sources/android/native_app_glue)
+	target_link_libraries(android_native_app_glue PUBLIC android log)
+	target_link_libraries(AliceCommon INTERFACE android_native_app_glue android log EGL GLESv3)
+	# sem isso o linker descarta ANativeActivity_onCreate (ninguem dentro da .so o referencia)
+	target_link_options(AliceCommon INTERFACE "-u" "ANativeActivity_onCreate")
 else()
 	target_link_libraries(AliceCommon INTERFACE dependency_tbb)
 	target_link_libraries(AliceCommon INTERFACE glfw)
@@ -502,8 +527,13 @@ target_include_directories(AliceCommon INTERFACE
 	${PROJECT_SOURCE_DIR}/src/scripting/luajit
 	${PROJECT_SOURCE_DIR}/src/zstd
 	${PROJECT_SOURCE_DIR}/src/lunasvg
-	"${glew_SOURCE_DIR}/include/GL"
 	"ankerl")
+if(ANDROID)
+	# glew.h substituto que inclui os headers GLES 3.2 do NDK
+	target_include_directories(AliceCommon INTERFACE ${PROJECT_SOURCE_DIR}/src/graphics/android_gl)
+else()
+	target_include_directories(AliceCommon INTERFACE "${glew_SOURCE_DIR}/include/GL")
+endif()
 
 target_link_libraries(Alice PRIVATE AliceCommon)
 target_link_libraries(AliceIncremental PRIVATE AliceCommon)
