@@ -96,7 +96,16 @@ public:
 	bool has_focus = false;    // entre APP_CMD_GAINED_FOCUS e APP_CMD_LOST_FOCUS
 	bool game_started = false; // android_start_game ja rodou (on_create etc.)
 	bool loading = false;      // cenario sendo carregado/montado (tela de espera)
-	bool choose_ui_scale = false; // sem user_settings.dat: escolher a escala pela tela
+	bool first_run_defaults = false; // sem user_settings.dat: escala da interface pela tela, MSAA desligado
+
+	// Renderizacao em resolucao reduzida: o jogo desenha em render_width x
+	// render_height e o hardware de video do aparelho amplia para a tela
+	// (ANativeWindow_setBuffersGeometry), sem custo para a GPU. O shader do mapa
+	// e pesado (dezenas de leituras de textura por pixel) e a tela de um celular
+	// tem 2-3 milhoes de pixels; 0,75 desenha ~44% menos pixels.
+	float render_scale = 0.75f;
+	int32_t physical_width = 0, physical_height = 0; // pixels da tela (coordenadas do toque)
+	int32_t render_width = 0, render_height = 0;     // pixels desenhados (coordenadas do jogo)
 	std::chrono::steady_clock::time_point last_background_save{};
 };
 

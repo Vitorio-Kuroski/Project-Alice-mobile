@@ -444,6 +444,10 @@ else() # GCC or CLANG
 		# ARM: sem flags de vetor x86 (-march=nehalem nao existe aqui)
 		target_compile_options(AliceCommon INTERFACE
 		-fno-fast-math -ffp-model=precise -ffp-contract=off )
+		# -mtune so muda a ordem/escolha de instrucoes para o Cortex-A76 (nucleo
+		# grande do Snapdragon 675/7xx/8xx e de muitos Dimensity/Exynos); o
+		# conjunto de instrucoes continua armv8-a, entao roda em qualquer arm64
+		target_compile_options(AliceCommon INTERFACE -mtune=cortex-a76)
 		# o toolchain do NDK sempre poe -g; com -O3 o main.cpp (tudo num arquivo
 		# so) passa de 13 GB de memoria no compilador. No release os simbolos
 		# seriam removidos de qualquer jeito (android/collect-native-libs.sh).

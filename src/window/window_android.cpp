@@ -58,9 +58,9 @@ bool is_key_depressed(sys::state const& game_state, sys::virtual_key key) {
 }
 
 void get_window_size(sys::state const& game_state, int& width, int& height) {
-	if(game_state.win_ptr && game_state.win_ptr->native_window) {
-		width = ANativeWindow_getWidth(game_state.win_ptr->native_window);
-		height = ANativeWindow_getHeight(game_state.win_ptr->native_window);
+	if(game_state.win_ptr && game_state.win_ptr->native_window && game_state.win_ptr->render_width > 0) {
+		width = game_state.win_ptr->render_width;
+		height = game_state.win_ptr->render_height;
 	} else {
 		// sem janela (app em segundo plano): ultimo tamanho conhecido
 		width = game_state.x_size;
@@ -90,6 +90,29 @@ void create_window(sys::state& game_state, creation_parameters const& params) {
 }
 
 namespace {
+
+// pixels desenhados / pixels da tela: converte as coordenadas do toque e do
+// mouse (sempre em pixels da tela) para as do jogo
+float g_input_scale = 1.f;
+
+// Define o tamanho dos buffers da janela pela render_scale. O hardware de
+// composicao do Android amplia a imagem para a tela inteira.
+void apply_render_scale(window_data_impl& win) {
+	if(!win.native_window)
+		return;
+	// (0, 0) volta ao tamanho natural, para medir a tela de verdade
+	ANativeWindow_setBuffersGeometry(win.native_window, 0, 0, 0);
+	win.physical_width = ANativeWindow_getWidth(win.native_window);
+	win.physical_height = ANativeWindow_getHeight(win.native_window);
+	if(win.physical_width <= 0 || win.physical_height <= 0)
+		return;
+	float const scale = std::clamp(win.render_scale, 0.25f, 1.f);
+	win.render_width = std::max(1, int32_t(std::lround(float(win.physical_width) * scale)));
+	win.render_height = std::max(1, int32_t(std::lround(float(win.physical_height) * scale)));
+	if(win.render_width != win.physical_width || win.render_height != win.physical_height)
+		ANativeWindow_setBuffersGeometry(win.native_window, win.render_width, win.render_height, 0);
+	g_input_scale = float(win.render_width) / float(win.physical_width);
+}
 
 bool init_egl_display(window_data_impl& win) {
 	win.egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -144,6 +167,7 @@ bool create_egl_context(window_data_impl& win) {
 
 bool create_egl_surface(window_data_impl& win, ANativeWindow* native_window) {
 	win.native_window = native_window;
+	apply_render_scale(win);
 	win.egl_surface = eglCreateWindowSurface(win.egl_display, win.egl_config, native_window, nullptr);
 	if(win.egl_surface == EGL_NO_SURFACE) {
 		ALICE_LOGE("eglCreateWindowSurface falhou (0x%x)", eglGetError());
@@ -182,11 +206,12 @@ void update_window_size(sys::state& state) {
 	auto& win = *state.win_ptr;
 	if(!win.native_window)
 		return;
-	int32_t const width = ANativeWindow_getWidth(win.native_window);
-	int32_t const height = ANativeWindow_getHeight(win.native_window);
+	apply_render_scale(win); // rotacao etc.: mede a tela de novo
+	int32_t const width = win.render_width;
+	int32_t const height = win.render_height;
 	if(width <= 0 || height <= 0 || (width == state.x_size && height == state.y_size))
 		return;
-	ALICE_LOGI("tamanho da tela: %dx%d", width, height);
+	ALICE_LOGI("tela %dx%d, desenhando em %dx%d (escala %.2f)", win.physical_width, win.physical_height, width, height, win.render_scale);
 	if(win.game_started)
 		state.on_resize(width, height, window_state::maximized);
 	state.x_size = width;
@@ -330,9 +355,18 @@ struct touch_tracker {
 };
 touch_tracker touch;
 
+// posicao do ponteiro em pixels do jogo (ver g_input_scale)
+float event_x(AInputEvent const* event, size_t pointer) {
+	return AMotionEvent_getX(event, pointer) * g_input_scale;
+}
+float event_y(AInputEvent const* event, size_t pointer) {
+	return AMotionEvent_getY(event, pointer) * g_input_scale;
+}
+
+// em pixels do jogo
 float touch_slop_px(android_app* app) {
 	int32_t const density = app->config ? AConfiguration_getDensity(app->config) : ACONFIGURATION_DENSITY_MEDIUM;
-	return touch_slop_dp * float(density > 0 ? density : ACONFIGURATION_DENSITY_MEDIUM) / float(ACONFIGURATION_DENSITY_MEDIUM);
+	return touch_slop_dp * float(density > 0 ? density : ACONFIGURATION_DENSITY_MEDIUM) / float(ACONFIGURATION_DENSITY_MEDIUM) * g_input_scale;
 }
 
 sys::key_modifiers modifiers_from_meta(int32_t meta) {
@@ -432,8 +466,8 @@ int32_t find_pointer_index(AInputEvent const* event, int32_t id) {
 }
 
 void pinch_geometry(AInputEvent const* event, float& mid_x, float& mid_y, float& distance) {
-	float const x0 = AMotionEvent_getX(event, 0), y0 = AMotionEvent_getY(event, 0);
-	float const x1 = AMotionEvent_getX(event, 1), y1 = AMotionEvent_getY(event, 1);
+	float const x0 = event_x(event, 0), y0 = event_y(event, 0);
+	float const x1 = event_x(event, 1), y1 = event_y(event, 1);
 	mid_x = (x0 + x1) * 0.5f;
 	mid_y = (y0 + y1) * 0.5f;
 	distance = std::max(std::hypot(x1 - x0, y1 - y0), 1.f);
@@ -464,8 +498,8 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 	case AMOTION_EVENT_ACTION_DOWN: {
 		touch.current = touch_tracker::mode::pending;
 		touch.primary_id = AMotionEvent_getPointerId(event, 0);
-		touch.start_x = touch.last_x = AMotionEvent_getX(event, 0);
-		touch.start_y = touch.last_y = AMotionEvent_getY(event, 0);
+		touch.start_x = touch.last_x = event_x(event, 0);
+		touch.start_y = touch.last_y = event_y(event, 0);
 		touch.down_time = std::chrono::steady_clock::now();
 		// sem botao apertado: so posiciona o "cursor" para o jogo achar o que esta sob o dedo
 		game_mouse_move(state, int32_t(touch.last_x), int32_t(touch.last_y), mod);
@@ -504,8 +538,8 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 		int32_t const index = find_pointer_index(event, touch.primary_id);
 		if(index < 0)
 			break;
-		float const x = AMotionEvent_getX(event, index);
-		float const y = AMotionEvent_getY(event, index);
+		float const x = event_x(event, index);
+		float const y = event_y(event, index);
 
 		if(touch.current == touch_tracker::mode::pending) {
 			if(std::hypot(x - touch.start_x, y - touch.start_y) < touch_slop_px(app))
@@ -575,8 +609,8 @@ void update_touch(sys::state& state) {
 // mouse USB/Bluetooth: repassa direto como no desktop
 int32_t handle_mouse(sys::state& state, AInputEvent* event) {
 	int32_t const masked = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
-	auto const x = int32_t(AMotionEvent_getX(event, 0));
-	auto const y = int32_t(AMotionEvent_getY(event, 0));
+	auto const x = int32_t(event_x(event, 0));
+	auto const y = int32_t(event_y(event, 0));
 	auto const mod = modifiers_from_meta(AMotionEvent_getMetaState(event));
 
 	switch(masked) {
@@ -761,6 +795,12 @@ void render_frame(sys::state& state) {
 		render_touch_placeholder(state);
 	}
 
+	// GPU de celular desenha em blocos no proprio chip; avisar que depth e
+	// stencil do quadro nao serao mais usados evita grava-los na memoria.
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	GLenum const discard[] = { GL_DEPTH, GL_STENCIL };
+	glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, discard);
+
 	if(!eglSwapBuffers(win.egl_display, win.egl_surface)) {
 		EGLint const err = eglGetError();
 		ALICE_LOGE("eglSwapBuffers falhou (0x%x)", err);
@@ -815,17 +855,24 @@ void android_start_game(sys::state& state) {
 	sound::start_music(state, state.user_settings.master_volume * state.user_settings.music_volume);
 
 	// equivalente ao on_window_change inicial do window_nix.cpp
-	int32_t const width = ANativeWindow_getWidth(win.native_window);
-	int32_t const height = ANativeWindow_getHeight(win.native_window);
+	int32_t const width = win.render_width;
+	int32_t const height = win.render_height;
 
-	if(win.choose_ui_scale) {
-		// primeira execucao (sem user_settings.dat): escala pela tela; fica salva
-		// e pode ser mudada depois nas opcoes do jogo
+	if(win.first_run_defaults) {
+		// primeira execucao (sem user_settings.dat); fica salvo e pode ser
+		// mudado depois nas opcoes do jogo:
+		//  - escala da interface pela tela. A densidade conta em pixels
+		//    desenhados: com render_scale 0,75 cada um ocupa mais espaco na tela.
 		int32_t const density = win.app->config ? AConfiguration_getDensity(win.app->config) : ACONFIGURATION_DENSITY_MEDIUM;
-		state.user_settings.ui_scale = android_default_ui_scale(width, height, density);
+		int32_t const render_density = int32_t(float(density) * float(width) / float(std::max(1, win.physical_width)));
+		state.user_settings.ui_scale = android_default_ui_scale(width, height, render_density);
+		//  - sem MSAA: o jogo desenha numa textura multisample separada e resolve
+		//    com um shader proprio; numa GPU de celular (tile-based) isso tira as
+		//    4 amostras de cada pixel do chip para a memoria a cada quadro.
+		state.user_settings.antialias_level = 0;
 		state.save_user_settings();
-		win.choose_ui_scale = false;
-		ALICE_LOGI("escala da interface: %.2f (tela %dx%d, %d dpi)", state.user_settings.ui_scale, width, height, density);
+		win.first_run_defaults = false;
+		ALICE_LOGI("primeira execucao: escala da interface %.2f (desenho %dx%d, %d dpi efetivos), MSAA desligado", state.user_settings.ui_scale, width, height, render_density);
 	}
 
 	state.on_resize(width, height, window_state::maximized);

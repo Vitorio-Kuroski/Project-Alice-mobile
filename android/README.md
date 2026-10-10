@@ -30,7 +30,13 @@ Port para Android do [Project Alice](https://github.com/schombert/Project-Alice)
 
 A pasta escolhida fica salva. Para trocá-la, apague o arquivo `game_folder.txt` (ver [Onde ficam os arquivos](#onde-ficam-os-arquivos)) ou limpe os dados do app.
 
-Na primeira vez a **escala da interface** é escolhida pela tela do aparelho, para os botões ficarem num tamanho bom para o dedo sem que as janelas do jogo deixem de caber. Um celular comum fica com 1,5×. Dá para mudar depois nas opções do jogo.
+Na primeira vez o app ajusta duas opções para o aparelho. As duas podem ser mudadas depois nas opções do jogo:
+- **Escala da interface:** escolhida pela tela, para os botões ficarem num tamanho bom para o dedo sem que as janelas do jogo deixem de caber.
+- **Antialiasing (MSAA): desligado.** Em GPU de celular ele custa caro e, em telas de ~400 dpi, quase não se vê o serrilhado.
+
+### Desempenho
+
+Para aliviar a GPU, o jogo **desenha em 75% da resolução da tela** e o hardware de vídeo do aparelho amplia a imagem, sem custo. Numa tela de 2340×1080, ele desenha em 1755×810, cerca de 44% menos pixels no shader do mapa, que é o mais pesado. O texto fica um pouco menos nítido. O valor fica em `render_scale` (`src/window/window.hpp`); ainda não há opção no jogo para mudá-lo.
 
 ### Sair no meio da partida
 
@@ -126,6 +132,7 @@ O código nativo é compilado pelo CMake, não pelo Gradle. O Gradle só empacot
 
 Outras decisões que valem saber:
 
+- **Otimizações para GPU de celular:** renderização em 75% da resolução (`ANativeWindow_setBuffersGeometry`; toque e mouse são convertidos para a escala do desenho), MSAA desligado por padrão, `glInvalidateFramebuffer` do depth/stencil antes de cada troca de quadro (evita gravá-los na memória numa GPU que desenha em blocos) e `-mtune=cortex-a76` (só ajusta a escolha de instruções; continua rodando em qualquer arm64).
 - **LuaJIT** é linkado de forma estática no Android. A `.so` dele tem nome com versão (`libluajit-5.1.so.2`), que o Android não carrega de dentro do APK.
 - **ICU:** o jogo só usa a quebra de texto do ICU (caracteres, palavras e linhas). No Android 12+ ela vem do sistema (`libicu.so`, carregada com `dlopen`). No Android 11, que não tem ICU público para apps, entra uma implementação própria em `src/text/icu_android_compat.hpp`. Comparada com o ICU nos textos de localização do Alice, ela dá a mesma quebra de linha em ~99% das frases em inglês, alemão e russo; chinês e japonês ficam aproximados.
 - **Sistema de arquivos:** é o mesmo do Linux (`simple_fs_nix.cpp`). `$HOME` aponta para a pasta externa do app, e as raízes do jogo são `[pasta do Victoria 2, pasta interna com assets/]`.
