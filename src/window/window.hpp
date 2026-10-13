@@ -125,6 +125,8 @@ void android_launcher_update(sys::state& game_state);
 // Implementado em entry_point_android.cpp: abre (mensagem) ou fecha ("") a
 // janela de carregamento da AliceActivity. Pode ser chamado de qualquer thread.
 void android_set_loading(char const* message);
+// contador de desempenho (toque de tres dedos); vazio esconde
+void android_set_stats(char const* text);
 
 // Com o cenario carregado e uma superficie EGL ativa: inicia OpenGL, som e o
 // on_create (o final do create_window de window_nix.cpp).
