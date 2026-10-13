@@ -36,6 +36,7 @@
 #include <EGL/eglext.h>
 #include <GLES3/gl32.h>
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 
@@ -810,8 +811,16 @@ void render_frame(sys::state& state) {
 	auto& win = *state.win_ptr;
 
 	if(win.game_started) {
+		// Carregar um save trava a tela ate a thread do jogo terminar (e o
+		// pedido de cursor "ocupado" dela fica na fila desta mesma tela). A
+		// janela de carregamento abre antes de esperar, e recebe os toques.
+		bool const must_wait = state.yield_game_state_resetting_lock;
+		if(must_wait)
+			android_set_loading("Carregando...");
 		std::shared_lock lock(state.game_state_resetting_lock);
 		state.game_state_resetting_cv.wait(lock, [&] { return !state.yield_game_state_resetting_lock; });
+		if(must_wait)
+			android_set_loading("");
 		state.render();
 	} else {
 		// sem jogo carregado ainda: prova que EGL/superficie/vsync e o toque funcionam
@@ -945,7 +954,13 @@ void run_android_main_loop(sys::state& game_state, android_app* app) {
 }
 
 void change_cursor(sys::state& state, cursor_type type) {
-	// no-op -- nao ha cursor de mouse em touchscreen
+	// Nao ha cursor em touchscreen. Mas o jogo marca com o cursor "ocupado" os
+	// trabalhos demorados que travam a thread (criar a interface ao entrar na
+	// partida, carregar save...): no Android isso vira a janela de carregamento.
+	static std::atomic<bool> busy{ false };
+	bool const now_busy = type == cursor_type::busy;
+	if(busy.exchange(now_busy) != now_busy)
+		android_set_loading(now_busy ? "Carregando..." : "");
 }
 
 void emit_error_message(std::string const& content, bool fatal) {

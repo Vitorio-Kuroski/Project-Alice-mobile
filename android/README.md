@@ -38,6 +38,10 @@ Na primeira vez o app ajusta duas opções para o aparelho. As duas podem ser mu
 
 Para aliviar a GPU, o jogo **desenha em 75% da resolução da tela** e o hardware de vídeo do aparelho amplia a imagem, sem custo. Numa tela de 2340×1080, ele desenha em 1755×810, cerca de 44% menos pixels no shader do mapa, que é o mais pesado. O texto fica um pouco menos nítido. O valor fica em `render_scale` (`src/window/window.hpp`); ainda não há opção no jogo para mudá-lo.
 
+### Carregamentos
+
+Ao entrar na partida o jogo monta toda a interface de uma vez, e no celular isso leva alguns segundos. O mesmo vale para carregar um save. Nesses momentos aparece a janela **"Carregando..."** do Android. Ela recebe os toques enquanto o jogo está ocupado, o que evita o aviso de "o app não está respondendo".
+
 ### Sair no meio da partida
 
 Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **salva** em `android_autosave.bin`, porque o Android pode fechar apps em segundo plano sem avisar. Para continuar depois, carregue esse save. O arquivo é sempre o mesmo (sobrescrito) e é gravado no máximo uma vez a cada 30 s. Só vale para o modo single-player.

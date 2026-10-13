@@ -122,6 +122,10 @@ void run_android_main_loop(sys::state& game_state, android_app* app);
 // a escolha da pasta do jogo e o carregamento do cenario.
 void android_launcher_update(sys::state& game_state);
 
+// Implementado em entry_point_android.cpp: abre (mensagem) ou fecha ("") a
+// janela de carregamento da AliceActivity. Pode ser chamado de qualquer thread.
+void android_set_loading(char const* message);
+
 // Com o cenario carregado e uma superficie EGL ativa: inicia OpenGL, som e o
 // on_create (o final do create_window de window_nix.cpp).
 void android_start_game(sys::state& game_state);

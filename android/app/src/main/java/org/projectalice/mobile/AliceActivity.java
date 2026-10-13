@@ -6,11 +6,17 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
+import android.view.Gravity;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.widget.Toast;
 
 /**
@@ -35,6 +41,10 @@ public class AliceActivity extends NativeActivity {
 
 	private boolean waitingForAllFilesAccess = false;
 	private AlertDialog folderDialog = null;
+
+	private final Handler uiHandler = new Handler(Looper.getMainLooper());
+	private AlertDialog loadingDialog = null;
+	private Runnable pendingLoadingDialog = null;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -82,6 +92,62 @@ public class AliceActivity extends NativeActivity {
 	/** Chamado pelo C++ quando nao ha pasta do jogo valida configurada. */
 	public void requestGameFolder(final String reason) {
 		runOnUiThread(() -> showFolderDialog(reason));
+	}
+
+	/**
+	 * Janela de carregamento, pedida pelo C++ (change_cursor "ocupado") antes
+	 * de trabalhos que travam a thread do jogo -- ex.: criar a interface ao
+	 * entrar na partida. Ela e desenhada pelo sistema, entao aparece e se anima
+	 * mesmo com o jogo travado, e enquanto esta aberta os toques vao para ela:
+	 * sem isso o Android mostrava "o app nao esta respondendo". So aparece se o
+	 * trabalho passar de 300 ms, para carregamentos rapidos nao piscarem.
+	 * Mensagem vazia fecha.
+	 */
+	public void setLoading(final String message) {
+		runOnUiThread(() -> {
+			if(pendingLoadingDialog != null) {
+				uiHandler.removeCallbacks(pendingLoadingDialog);
+				pendingLoadingDialog = null;
+			}
+			if(message == null || message.isEmpty()) {
+				if(loadingDialog != null) {
+					loadingDialog.dismiss();
+					loadingDialog = null;
+				}
+				return;
+			}
+			if(loadingDialog != null)
+				return;
+			pendingLoadingDialog = () -> {
+				pendingLoadingDialog = null;
+				showLoadingDialog(message);
+			};
+			uiHandler.postDelayed(pendingLoadingDialog, 300);
+		});
+	}
+
+	private void showLoadingDialog(String message) {
+		if(isFinishing())
+			return;
+		int padding = (int)(24 * getResources().getDisplayMetrics().density);
+		LinearLayout layout = new LinearLayout(this);
+		layout.setOrientation(LinearLayout.HORIZONTAL);
+		layout.setGravity(Gravity.CENTER_VERTICAL);
+		layout.setPadding(padding, padding, padding, padding);
+		ProgressBar spinner = new ProgressBar(this);
+		spinner.setIndeterminate(true);
+		layout.addView(spinner);
+		TextView text = new TextView(this);
+		text.setText(message);
+		text.setTextSize(18);
+		text.setPadding(padding, 0, 0, 0);
+		layout.addView(text);
+		loadingDialog = new AlertDialog.Builder(this)
+			.setView(layout)
+			.setCancelable(false)
+			.create();
+		loadingDialog.setCanceledOnTouchOutside(false);
+		loadingDialog.show();
 	}
 
 	/** Mensagem curta na tela (ex.: "Criando o cenario..."). */
