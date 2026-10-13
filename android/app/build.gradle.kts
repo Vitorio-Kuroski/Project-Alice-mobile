@@ -50,8 +50,8 @@ android {
         applicationId = "org.projectalice.mobile"
         minSdk = 30 // Android 11; ICU: ver src/text/icu_android_compat.hpp
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.3"
+        versionCode = 3
+        versionName = "0.4"
 
         ndk {
             abiFilters += listOf("arm64-v8a")

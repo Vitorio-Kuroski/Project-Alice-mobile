@@ -16,7 +16,7 @@ Versão de testes do **Project Alice para Android**: o motor de código aberto p
 4. Abra o app, toque em **Escolher pasta**, ative **Acesso a todos os arquivos**, volte ao app e escolha a pasta do jogo.
 5. Na primeira vez o app monta o cenário, o que pode levar vários minutos.
 
-Se você já tinha uma versão anterior instalada e aberta, limpe os dados do app antes, para valerem os ajustes de escala e de gráficos.
+**Já tem a v0.3 instalada?** Esta versão não instala por cima dela: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.4 uma vez.
 
 ## Controles
 
@@ -33,13 +33,9 @@ Mouse e teclado físicos também funcionam.
 
 ## Novidades desta versão
 
-- Funciona a partir do **Android 11**.
-- Build **otimizado** e ajustado para GPUs de celular: desenho em 75% da resolução, antialiasing desligado por padrão.
-- **Escala da interface** escolhida pela tela do aparelho.
-- **Tela cheia de verdade:** as barras do sistema ficam escondidas, e deslizar a partir da borda as mostra.
-- **Corrigido:** painéis da interface piscando nas GPUs Adreno.
-- **Janela "Carregando..."** ao entrar na partida e ao carregar saves, sem o aviso de "o app não está respondendo".
-- Ao sair do app no meio da partida, o jogo **pausa e salva** em `android_autosave.bin`.
+- **Sincronizado com o Project Alice original** ([schombert/Project-Alice](https://github.com/schombert/Project-Alice)): traz as 74 mudanças mais recentes do motor, com correções e ajustes de jogo e de interface.
+- Texto renderizado com o Harfbuzz 14.4, versão mais nova da biblioteca de fontes.
+- Continua com tudo da v0.3: Android 11+, build otimizado para GPUs de celular, escala da interface pela tela, tela cheia, correção dos painéis piscando nas Adreno, janela "Carregando..." e salvamento automático ao sair do app.
 
 ## Limitações conhecidas
 
