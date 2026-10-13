@@ -101,9 +101,13 @@ void call_activity(char const* method, std::string const& argument) {
 		vm->DetachCurrentThread();
 }
 
-void show_message(std::string const& message) {
-	LAUNCHER_LOGI("%s", message.c_str());
-	call_activity("showMessage", message);
+// Etapa da abertura na janela de carregamento, que fica aberta ate o jogo
+// aparecer (um aviso comum some em segundos e a montagem do cenario leva
+// minutos). Vazio fecha.
+void show_progress(std::string const& message) {
+	if(!message.empty())
+		LAUNCHER_LOGI("%s", message.c_str());
+	call_activity("setLoading", message);
 }
 
 void wake_main_loop() {
@@ -168,7 +172,7 @@ bool extract_alice_assets() {
 		return true;
 	}
 
-	show_message("Preparando os arquivos do Project Alice...");
+	show_progress("Preparando os arquivos do Project Alice...");
 	// a lista antiga sai primeiro: se a extracao for interrompida, recomeca na proxima vez
 	unlink(extracted_manifest_path.c_str());
 
@@ -374,12 +378,14 @@ bool build_scenario_file() {
 
 void fail(std::string const& message) {
 	LAUNCHER_LOGE("%s", message.c_str());
+	show_progress("");
 	call_activity("showMessage", message);
 	status.store(load_status::failed);
 	wake_main_loop();
 }
 
 void need_folder(std::string const& reason) {
+	show_progress(""); // o seletor de pasta precisa dos toques
 	{
 		std::lock_guard lock(shared_mutex);
 		need_folder_reason = reason;
@@ -389,6 +395,7 @@ void need_folder(std::string const& reason) {
 }
 
 void run_loader() {
+	show_progress("Abrindo o Project Alice...");
 	if(!extract_alice_assets()) {
 		fail("Nao foi possivel preparar os arquivos do Project Alice (sem espaco livre?).");
 		return;
@@ -428,14 +435,14 @@ void run_loader() {
 	check_scenario_folder();
 	find_scenario_file();
 	if(selected_scenario_file.empty()) {
-		show_message("Montando o cenario do Victoria 2. Na primeira vez isso pode levar varios minutos.");
+		show_progress("Montando o cenário do Victoria 2.\nIsso só acontece na primeira vez e pode levar vários minutos.");
 		if(!build_scenario_file()) {
 			fail("Nao foi possivel montar o cenario. Veja scenario_errors.log na pasta do app.");
 			return;
 		}
 	}
 
-	show_message("Carregando o cenario...");
+	show_progress("Carregando o cenário...");
 	if(!sys::try_read_scenario_and_save_file(game_state, selected_scenario_file)) {
 		fail("O arquivo de cenario nao pode ser lido.");
 		return;
@@ -452,6 +459,7 @@ void run_loader() {
 	game_state.win_ptr->first_run_defaults = !has_saved_settings;
 	ui::populate_definitions_map(game_state);
 
+	show_progress("Iniciando o jogo...");
 	status.store(load_status::ready);
 	wake_main_loop();
 }
@@ -520,6 +528,7 @@ void android_launcher_update(sys::state& state) {
 			if(!game_threads_started)
 				start_game_threads(state);
 			android_start_game(state);
+			show_progress(""); // a janela de carregamento da abertura fecha com o jogo na tela
 		}
 		break;
 	case load_status::working:
