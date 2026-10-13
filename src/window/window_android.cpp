@@ -101,7 +101,7 @@ void apply_render_scale(window_data_impl& win) {
 	if(!win.native_window)
 		return;
 	// (0, 0) volta ao tamanho natural, para medir a tela de verdade
-	ANativeWindow_setBuffersGeometry(win.native_window, 0, 0, 0);
+	ANativeWindow_setBuffersGeometry(win.native_window, 0, 0, WINDOW_FORMAT_RGBX_8888);
 	win.physical_width = ANativeWindow_getWidth(win.native_window);
 	win.physical_height = ANativeWindow_getHeight(win.native_window);
 	if(win.physical_width <= 0 || win.physical_height <= 0)
@@ -110,7 +110,7 @@ void apply_render_scale(window_data_impl& win) {
 	win.render_width = std::max(1, int32_t(std::lround(float(win.physical_width) * scale)));
 	win.render_height = std::max(1, int32_t(std::lround(float(win.physical_height) * scale)));
 	if(win.render_width != win.physical_width || win.render_height != win.physical_height)
-		ANativeWindow_setBuffersGeometry(win.native_window, win.render_width, win.render_height, 0);
+		ANativeWindow_setBuffersGeometry(win.native_window, win.render_width, win.render_height, WINDOW_FORMAT_RGBX_8888);
 	g_input_scale = float(win.render_width) / float(win.physical_width);
 }
 
@@ -121,22 +121,45 @@ bool init_egl_display(window_data_impl& win) {
 		return false;
 	}
 
+	// Superficie OPACA (sem canal alfa). Com alfa, os pixels semitransparentes
+	// que o jogo deixa no framebuffer (bordas e texturas com transparencia dos
+	// paineis) viram pixels translucidos da janela do app, e o compositor do
+	// Android os mistura com o que esta atras -- os paineis piscavam na Adreno.
+	// No desktop o alfa da janela e ignorado, entao la isso nunca apareceu.
 	EGLint const config_attribs[] = {
 		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
 		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
 		EGL_RED_SIZE, 8,
 		EGL_GREEN_SIZE, 8,
 		EGL_BLUE_SIZE, 8,
-		EGL_ALPHA_SIZE, 8,
+		EGL_ALPHA_SIZE, 0,
 		EGL_DEPTH_SIZE, 24,
 		EGL_STENCIL_SIZE, 8,
 		EGL_NONE
 	};
+	// eglChooseConfig trata os tamanhos como minimos e ordena primeiro os com
+	// mais bits de cor (RGBA8 antes de RGB8), entao procura um sem alfa
+	EGLConfig configs[64];
 	EGLint num_configs = 0;
-	if(!eglChooseConfig(win.egl_display, config_attribs, &win.egl_config, 1, &num_configs) || num_configs == 0) {
-		ALICE_LOGE("nenhuma configuracao EGL com GLES 3 + RGBA8 + depth24/stencil8 (0x%x)", eglGetError());
+	if(!eglChooseConfig(win.egl_display, config_attribs, configs, 64, &num_configs) || num_configs == 0) {
+		ALICE_LOGE("nenhuma configuracao EGL com GLES 3 + RGB8 + depth24/stencil8 (0x%x)", eglGetError());
 		return false;
 	}
+	win.egl_config = configs[0];
+	for(EGLint i = 0; i < num_configs; ++i) {
+		EGLint r = 0, g = 0, b = 0, a = 0;
+		eglGetConfigAttrib(win.egl_display, configs[i], EGL_RED_SIZE, &r);
+		eglGetConfigAttrib(win.egl_display, configs[i], EGL_GREEN_SIZE, &g);
+		eglGetConfigAttrib(win.egl_display, configs[i], EGL_BLUE_SIZE, &b);
+		eglGetConfigAttrib(win.egl_display, configs[i], EGL_ALPHA_SIZE, &a);
+		if(r == 8 && g == 8 && b == 8 && a == 0) {
+			win.egl_config = configs[i];
+			break;
+		}
+	}
+	EGLint chosen_alpha = 0;
+	eglGetConfigAttrib(win.egl_display, win.egl_config, EGL_ALPHA_SIZE, &chosen_alpha);
+	ALICE_LOGI("configuracao EGL: %s", chosen_alpha == 0 ? "RGB8 opaca" : "RGBA8 (sem opcao opaca; buffer marcado como RGBX)");
 	return true;
 }
 
