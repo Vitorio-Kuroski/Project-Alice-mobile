@@ -8,6 +8,9 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.widget.Toast;
 
 /**
@@ -36,6 +39,31 @@ public class AliceActivity extends NativeActivity {
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
+		hideSystemBars();
+	}
+
+	// O sistema mostra as barras de novo em varias situacoes (dialogos,
+	// teclado, voltar de outro app); escondidas de novo ao recuperar o foco.
+	@Override
+	public void onWindowFocusChanged(boolean hasFocus) {
+		super.onWindowFocusChanged(hasFocus);
+		if(hasFocus)
+			hideSystemBars();
+	}
+
+	/**
+	 * Modo imersivo: esconde as barras de status e de navegacao (que em
+	 * paisagem ficam na lateral, por cima do jogo). Deslizar a partir da borda
+	 * as mostra por alguns segundos, sem tirar o jogo da tela cheia.
+	 */
+	private void hideSystemBars() {
+		Window window = getWindow();
+		window.setDecorFitsSystemWindows(false);
+		WindowInsetsController controller = window.getInsetsController();
+		if(controller != null) {
+			controller.hide(WindowInsets.Type.systemBars());
+			controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+		}
 	}
 
 	@Override
