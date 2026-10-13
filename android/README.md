@@ -16,7 +16,7 @@ Port para Android do [Project Alice](https://github.com/schombert/Project-Alice)
 
 ### Instalação
 
-1. Baixe o APK na aba **Actions** do GitHub. Abra a execução mais recente do workflow "Android port - build do APK (arm64-v8a)" e baixe o artefato `ProjectAlice-arm64-v8a-android-arm64-release-apk` (o build otimizado; o de `android-arm64` é o de debug, bem mais lento).
+1. Baixe o APK na página de **Releases** do repositório (arquivo `ProjectAlice-<versão>-arm64.apk`) ou, para a versão mais recente da branch, na aba **Actions**. Abra a execução mais recente do workflow "Android port - build do APK (arm64-v8a)" e baixe o artefato `ProjectAlice-arm64-v8a-android-arm64-release-apk` (o build otimizado; o de `android-arm64` é o de debug, bem mais lento).
 2. Copie a pasta do Victoria 2 para o aparelho, por exemplo para `Jogos/Victoria 2` no armazenamento interno. A pasta certa é a que contém `common`, `map` e `gfx`. Evite a pasta `Download` e a raiz do armazenamento: o seletor de pastas do Android 11+ não permite escolher essas.
 3. Instale o APK (é preciso permitir a instalação de fontes desconhecidas) ou use `adb install app-debug.apk`.
 
@@ -81,7 +81,7 @@ O log mostra cada etapa: extração dos arquivos, pasta escolhida, montagem e ca
 
 ### Compilar pelo GitHub Actions
 
-O workflow `.github/workflows/android-port-fase1.yml` roda manualmente. Na aba **Actions**, escolha "Android port - build do APK (arm64-v8a)", clique em **Run workflow**, selecione a branch e o preset: `android-arm64-release` (padrão, otimizado, para jogar) ou `android-arm64` (debug, com asserções, para investigar erros). Ele:
+O workflow `.github/workflows/android-port-fase1.yml` roda manualmente. Na aba **Actions**, escolha "Android port - build do APK (arm64-v8a)", clique em **Run workflow**, selecione a branch, o preset e, se quiser publicar, a **Tag do release** (ex.: `v0.3`); com ela preenchida o workflow cria um release no GitHub com o APK e as notas de `android/release-notes.md`. Presets: `android-arm64-release` (padrão, otimizado, para jogar) ou `android-arm64` (debug, com asserções, para investigar erros). Ele:
 
 1. valida os shaders como GLSL ES 3.20 e GLSL 4.60 (`android/validate-shaders.sh`);
 2. compila no Linux as ferramentas que geram código durante o build;

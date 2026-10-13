@@ -1,0 +1,53 @@
+Versão de testes do **Project Alice para Android**: o motor de código aberto para jogar Victoria 2, rodando nativamente no celular.
+
+> ⚠️ **Versão de testes.** Já roda num aparelho real (Moto One Hyper, Android 11, Adreno 612), mas espere problemas. Relatos são bem-vindos.
+
+## Requisitos
+
+- Android 11 ou mais novo, celular ou tablet **ARM 64 bits**
+- GPU com OpenGL ES 3.2
+- Os arquivos do **Victoria 2 com as expansões**, copiados para o aparelho. O conteúdo do jogo original não está incluído.
+
+## Como instalar
+
+1. Baixe o arquivo `.apk` abaixo, em **Assets**.
+2. Copie a pasta do Victoria 2 para o aparelho, por exemplo para `Jogos/Victoria 2`. A pasta certa é a que contém `common`, `map` e `gfx`. Evite a pasta `Download` e a raiz do armazenamento, que o seletor do Android não deixa escolher.
+3. Instale o APK. É preciso permitir a instalação de fontes desconhecidas.
+4. Abra o app, toque em **Escolher pasta**, ative **Acesso a todos os arquivos**, volte ao app e escolha a pasta do jogo.
+5. Na primeira vez o app monta o cenário, o que pode levar vários minutos.
+
+Se você já tinha uma versão anterior instalada e aberta, limpe os dados do app antes, para valerem os ajustes de escala e de gráficos.
+
+## Controles
+
+| Gesto | Equivale a |
+|---|---|
+| Toque rápido | Clique esquerdo |
+| Segurar parado por ~0,5 s | Clique direito |
+| Arrastar sobre a interface | Arrastar com o botão esquerdo |
+| Arrastar sobre o mapa | Mover o mapa |
+| Pinça com dois dedos | Zoom |
+| Voltar | ESC (menu) |
+
+Mouse e teclado físicos também funcionam.
+
+## Novidades desta versão
+
+- Funciona a partir do **Android 11**.
+- Build **otimizado** e ajustado para GPUs de celular: desenho em 75% da resolução, antialiasing desligado por padrão.
+- **Escala da interface** escolhida pela tela do aparelho.
+- **Tela cheia de verdade:** as barras do sistema ficam escondidas, e deslizar a partir da borda as mostra.
+- **Corrigido:** painéis da interface piscando nas GPUs Adreno.
+- **Janela "Carregando..."** ao entrar na partida e ao carregar saves, sem o aviso de "o app não está respondendo".
+- Ao sair do app no meio da partida, o jogo **pausa e salva** em `android_autosave.bin`.
+
+## Limitações conhecidas
+
+- Sem seleção de mods; só o jogo base.
+- Não é possível digitar texto (nome de save, chat).
+- Seleção em caixa de várias unidades com o dedo ainda não existe.
+- Entrar na partida leva alguns segundos num celular intermediário.
+
+## Problemas?
+
+Abra uma issue com a descrição. Se puder, anexe a saída de `adb logcat -s Alice`.

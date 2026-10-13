@@ -13,6 +13,10 @@ on:
         options:
           - android-arm64-release
           - android-arm64
+      release_tag:
+        description: "Tag do release (ex.: v0.3). Vazio = so gera o artefato; preenchido = publica um release no GitHub com o APK"
+        type: string
+        default: ""
 
 env:
   # r29 (clang/libc++ 21): o r27 (libc++ 18) nao tem std::atomic_ref nem
@@ -24,6 +28,8 @@ env:
 jobs:
   android-build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # criar o release/tag quando release_tag for preenchido
     steps:
       - uses: actions/checkout@v4
 
@@ -125,6 +131,21 @@ jobs:
           name: ProjectAlice-arm64-v8a-${{ env.PRESET }}-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+
+      - name: Preparar o APK para o release
+        if: ${{ inputs.release_tag != '' }}
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "ProjectAlice-${{ inputs.release_tag }}-arm64.apk"
+
+      - name: Publicar o release no GitHub
+        if: ${{ inputs.release_tag != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          name: Project Alice Android ${{ inputs.release_tag }}
+          body_path: android/release-notes.md
+          prerelease: true
+          files: ProjectAlice-${{ inputs.release_tag }}-arm64.apk
 
       - name: Publicar o log do build (sempre, mesmo se falhar)
         if: always()
