@@ -132,9 +132,11 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
 
+      # nome fixo: o README aponta para .../releases/latest/download/ProjectAlice-Android-arm64.apk,
+      # que sempre baixa o APK do release mais recente
       - name: Preparar o APK para o release
         if: ${{ inputs.release_tag != '' }}
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk "ProjectAlice-${{ inputs.release_tag }}-arm64.apk"
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk ProjectAlice-Android-arm64.apk
 
       - name: Publicar o release no GitHub
         if: ${{ inputs.release_tag != '' }}
@@ -144,8 +146,9 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Project Alice Android ${{ inputs.release_tag }}
           body_path: android/release-notes.md
-          prerelease: true
-          files: ProjectAlice-${{ inputs.release_tag }}-arm64.apk
+          # release normal (nao pre-release): o link "releases/latest" ignora pre-releases
+          make_latest: true
+          files: ProjectAlice-Android-arm64.apk
 
       - name: Publicar o log do build (sempre, mesmo se falhar)
         if: always()

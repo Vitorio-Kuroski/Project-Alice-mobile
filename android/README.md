@@ -2,7 +2,9 @@
 
 Port para Android do [Project Alice](https://github.com/schombert/Project-Alice), um motor de código aberto para jogar Victoria 2. O jogo roda nativamente: o mesmo código C++ do desktop é compilado para ARM64 e desenha com OpenGL ES 3.2.
 
-> **Situação:** o app compila e gera um APK instalável. Ainda **não foi testado num aparelho de verdade**, então espere ajustes no primeiro teste. Veja [Limitações conhecidas](#limitações-conhecidas).
+> **Situação:** versão de testes. Já roda num aparelho real (Moto One Hyper, Android 11, Adreno 612), mas espere problemas. Veja [Limitações conhecidas](#limitações-conhecidas).
+>
+> **[⬇️ Baixar a última versão (APK)](https://github.com/Vitorio-Kuroski/Project-Alice-mobile/releases/latest/download/ProjectAlice-Android-arm64.apk)**
 
 ## Para jogar
 
@@ -16,7 +18,7 @@ Port para Android do [Project Alice](https://github.com/schombert/Project-Alice)
 
 ### Instalação
 
-1. Baixe o APK na página de **Releases** do repositório (arquivo `ProjectAlice-<versão>-arm64.apk`) ou, para a versão mais recente da branch, na aba **Actions**. Abra a execução mais recente do workflow "Android port - build do APK (arm64-v8a)" e baixe o artefato `ProjectAlice-arm64-v8a-android-arm64-release-apk` (o build otimizado; o de `android-arm64` é o de debug, bem mais lento).
+1. Baixe o APK pelo [link da última versão](https://github.com/Vitorio-Kuroski/Project-Alice-mobile/releases/latest/download/ProjectAlice-Android-arm64.apk); as anteriores ficam em [Releases](https://github.com/Vitorio-Kuroski/Project-Alice-mobile/releases). Para testar algo ainda não publicado, use a aba **Actions**. Abra a execução mais recente do workflow "Android port - build do APK (arm64-v8a)" e baixe o artefato `ProjectAlice-arm64-v8a-android-arm64-release-apk` (o build otimizado; o de `android-arm64` é o de debug, bem mais lento).
 2. Copie a pasta do Victoria 2 para o aparelho, por exemplo para `Jogos/Victoria 2` no armazenamento interno. A pasta certa é a que contém `common`, `map` e `gfx`. Evite a pasta `Download` e a raiz do armazenamento: o seletor de pastas do Android 11+ não permite escolher essas.
 3. Instale o APK (é preciso permitir a instalação de fontes desconhecidas) ou use `adb install app-debug.apk`.
 
@@ -144,7 +146,7 @@ Outras decisões que valem saber:
 
 ### Limitações conhecidas
 
-- **Nunca rodou num aparelho real.** Tudo foi verificado só por compilação, pelo validador de shaders e por testes do decodificador de texturas.
+- **Testado em um único aparelho** até agora (Moto One Hyper, Adreno 612). Outras GPUs (Mali, PowerVR) ainda não foram testadas.
 - **Mods:** só o jogo base; falta uma tela de seleção de mods.
 - **Digitar texto** (nome de save, chat) não funciona: a API nativa não entrega os caracteres do teclado virtual. Isso precisa de uma ponte JNI.
 - **Seleção em caixa** de várias unidades com o dedo ainda não existe; dá para selecionar uma por vez.
