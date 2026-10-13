@@ -1,48 +1,46 @@
-# Project Alice
+# Project Alice mobile
 
-Project Alice is a continuation / rewrite of the Open V2 codebase (an open source "retro clone" of Victoria 2).
+Versão para Android do [Project Alice](https://github.com/schombert/Project-Alice), um motor de código aberto para jogar **Victoria 2**. O código C++ do jogo roda nativamente no celular (ARM64, OpenGL ES 3.2), com controles por toque.
 
-Join us on [discord](https://discord.gg/QUJExr4mRn) or visit our [documentation pages](https://github.com/schombert/Project-Alice/blob/main/docs/)
+## ⬇️ Download
 
-## How to install and play
-- [Download the latest release here](https://github.com/schombert/Project-Alice/releases)
-- Extract the archive and move the executable files and the assets folder into your main Victoria 2 directory. In other words, **Alice.exe should end up in the same folder as v2game.exe**.
-- IF YOU INSTALLED A PREVIOUS DEMO OR RELEASE: I suggest that you delete it and the old assets folder before copying over the new one, as an extra precaution.
-- Start the game by running launch_alice.exe.
-- Mods may or may not run with more or less problems (see the October update and the compatibility patches channel in the discord for more information about particular mods).
-- Read up the [User and multiplayer guide](https://github.com/schombert/Project-Alice/blob/main/docs/user_guide.md) for further information and troubleshooting
+**[Baixar a última versão (APK)](https://github.com/Vitorio-Kuroski/Project-Alice-mobile/releases/latest/download/ProjectAlice-Android-arm64.apk)**
 
-### For Linux users
-- [Download the AppImage version in Github Actions](https://github.com/schombert/Project-Alice/actions)
-- Uncompress the archive and move the executable files and the assets folder into your main Victoria 2 directory. **AppImage file and assets should in the same folder as v2game.exe**.
-- Make the AppImage executable (e.g. Project_Alice.AppImage) by running `chmod +x Project_Alice.AppImage`.
-- Start the game by running `./Project_Alice.AppImage`.
-- Read up the [User and multiplayer guide](https://github.com/schombert/Project-Alice/blob/main/docs/user_guide.md#linux) for parameters.
+[Novidades e versões anteriores](https://github.com/Vitorio-Kuroski/Project-Alice-mobile/releases)
 
-## Contributing
-- Please, [visit this page](https://github.com/schombert/Project-Alice/blob/main/docs/contributing.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/zh-cn/contributing.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/es-es/contributing.md), [Deutsch](https://github.com/schombert/Project-Alice/blob/main/docs/de-de/contributing.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/pt/contributing.md))
+> **Versão de testes.** Já roda num aparelho real (Moto One Hyper, Android 11, Adreno 612), mas espere problemas.
 
-## Updates
-- [v1.2.2](docs/Devlogs/v1.2.2/README.md) [中文](docs/Devlogs/v1.2.2/cn.md)
-- [v1.2.1](docs/Devlogs/v1.2.1/README.md) [中文](docs/Devlogs/v1.2.1/README_cn.md)
-- [PA 1.2 PlayGuide](https://sneakbug8.com/project-alice) [简中](docs/zh-cn/PA%201.2%20玩法指南.md)
-- [2024 04](docs/Devlogs/2024-04/log_en.md), [简中](docs/Devlogs/2024-04/log_cn.md)
-- [2024 02](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2024-02/log_en.md), [简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2024-02/log_cn.md)
-- [January 2024 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2024-01/log_en.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2024-01/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2024-01/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2024-01/log_pt.md))
-- [December 2023 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-12/log_en.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-12/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-12/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-12/log_pt.md))
-- [November 2023 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-11/log_en.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/november/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-11/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-11/log_pt.md))
-- [October 2023 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-10/log_en.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-10/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-10/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-10/log_pt.md))
-- [September 2023 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-09/log_en.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-09/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-09/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-09/log_pt.md))
-- [August 2023 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-08/log_en.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-08/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-08/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-08/log_pt.md))
-- [July 2023 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-07/log_en.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-07/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-07/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-07/log_pt.md))
-- [June 2023 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-06/log_en.md) ([简体](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-06/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-06/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-06/log_pt.md))
-- [May 2023 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-05/log_en.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-05/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-05/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-05/log_pt.md))
-- [April 2023 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-04/log_en.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-04/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-04/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-04/log_pt.md))
-- [March 2023 update](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-03/log_en.md) ([简中](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-03/log_cn.md), [Español](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-03/log_es.md), [Português](https://github.com/schombert/Project-Alice/blob/main/docs/Devlogs/2023-03/log_pt.md))
+## Requisitos
 
-## About Project Alice (translated)
+- Android 11 ou mais novo, celular ou tablet **ARM 64 bits**
+- GPU com OpenGL ES 3.2
+- Os arquivos do **Victoria 2 com as expansões**, copiados para o aparelho. O conteúdo do jogo original não está incluído.
 
-- [简中介绍](./docs/zh-cn/about.md)
-- [Versión en español](./docs/es-es/about.md)
-- [Deutsche Version](./docs/de-de/about.md)
-- [Versão em português](./docs/pt/about.md)
+## Como instalar
+
+1. Baixe o APK pelo link acima.
+2. Copie a pasta do Victoria 2 para o aparelho, por exemplo para `Jogos/Victoria 2`. A pasta certa é a que contém `common`, `map` e `gfx`. Evite a pasta `Download` e a raiz do armazenamento, que o seletor do Android não deixa escolher.
+3. Instale o APK. É preciso permitir a instalação de fontes desconhecidas.
+4. Abra o app, toque em **Escolher pasta**, ative **Acesso a todos os arquivos**, volte ao app e escolha a pasta do jogo.
+5. Na primeira vez o app monta o cenário, o que pode levar vários minutos.
+
+## Controles
+
+| Gesto | Equivale a |
+|---|---|
+| Toque rápido | Clique esquerdo |
+| Segurar parado por ~0,5 s | Clique direito |
+| Arrastar sobre a interface | Arrastar com o botão esquerdo |
+| Arrastar sobre o mapa | Mover o mapa |
+| Pinça com dois dedos | Zoom |
+| Voltar | ESC (menu) |
+
+Mouse e teclado físicos também funcionam.
+
+## Mais informações
+
+O [**android/README.md**](android/README.md) tem o resto: onde ficam saves e configurações, desempenho, limitações conhecidas, como compilar e como o port funciona por dentro.
+
+## Problemas?
+
+Abra uma [issue](https://github.com/Vitorio-Kuroski/Project-Alice-mobile/issues) com a descrição. Se puder, anexe a saída de `adb logcat -s Alice`.

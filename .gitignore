@@ -392,3 +392,4 @@ FodyWeavers.xsd
 
 # User's git files
 *.diff
+/native-tools/
