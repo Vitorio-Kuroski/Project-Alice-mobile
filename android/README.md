@@ -90,6 +90,41 @@ O workflow `.github/workflows/android-port-fase1.yml` roda manualmente. Na aba *
 3. compila a `libAlice.so` para arm64-v8a com o NDK r29, no preset escolhido;
 4. gera o APK com o Gradle e o publica como artefato, junto com o log do build.
 
+### Assinatura com chave fixa
+
+O Android só instala um APK por cima de outro se os dois tiverem a mesma assinatura. Sem chave própria, cada execução do Actions assina com uma chave de debug nova, e o usuário precisa desinstalar o app (perdendo saves e configurações) a cada versão. Com a chave fixa guardada nos segredos do repositório, toda versão nova atualiza a anterior.
+
+Um release (campo **Tag do release** preenchido) **exige** a chave: sem ela o workflow para logo no início. Um build sem tag continua funcionando sem a chave, com um aviso.
+
+**1. Criar a chave** (uma vez só), num PC com JDK (o `keytool` vem com o Java e com o Android Studio) ou no próprio celular pelo [Termux](https://termux.dev) (`pkg install openjdk-17`):
+
+```bash
+keytool -genkeypair -keystore alice-release.p12 -storetype PKCS12 -alias alice \
+  -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=Project Alice mobile"
+```
+
+Ele pede uma senha, que vale para a chave e para o arquivo. Depois converta o arquivo para texto:
+
+```bash
+base64 -w0 alice-release.p12 > alice-release.b64     # Linux, Termux
+```
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("alice-release.p12")) | Set-Content alice-release.b64   # Windows
+```
+
+**2. Guardar no GitHub:** em **Settings → Secrets and variables → Actions → New repository secret**, crie:
+
+| Nome | Valor |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | o conteúdo de `alice-release.b64` |
+| `ANDROID_KEYSTORE_PASSWORD` | a senha escolhida |
+
+**3. Fazer backup** do `alice-release.p12` e da senha num lugar seguro, fora do repositório. O GitHub não deixa ler um segredo de volta. Se a chave se perder, a versão seguinte volta a exigir desinstalar o app. Nunca coloque a chave no repositório: com ela qualquer um assina um APK que se passa pelo app.
+
+O passo "Conferir a assinatura do APK" do workflow mostra o SHA-256 do certificado. Ele deve ser o mesmo em todos os releases.
+
+Localmente, o Gradle usa a chave fixa quando encontra `ALICE_KEYSTORE` (caminho do `.p12`) e `ALICE_KEYSTORE_PASSWORD` no ambiente; sem elas, usa a chave de debug da máquina.
+
 ### Compilar localmente
 
 Precisa de: CMake 3.28+, Ninja, clang, **Android NDK r29**, Android SDK (plataforma 35, build-tools 35), JDK 17+ e, no Linux, os pacotes de desenvolvimento de X11/OpenGL/ICU para as ferramentas de host.
@@ -152,6 +187,6 @@ Outras decisões que valem saber:
 - **Seleção em caixa** de várias unidades com o dedo ainda não existe; dá para selecionar uma por vez.
 - **Retomar depois de o Android fechar o app:** o save de segundo plano é feito, mas é preciso carregá-lo manualmente pelo menu.
 - **Valores de toque** (tempo do segurar, tolerância de movimento, velocidade do zoom da pinça) são palpites a ajustar com testes.
-- **Só arm64-v8a**, assinado com a chave de debug do Android (sem chave de release própria).
+- **Só arm64-v8a.**
 - **Memória:** texturas S3TC descomprimidas ocupam mais memória de vídeo em GPUs sem suporte a S3TC (Mali, PowerVR).
 - **DataContainer** é baixado da branch `master` sem versão fixa, e uma mudança lá pode quebrar o build.

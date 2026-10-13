@@ -33,6 +33,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Chave fixa de assinatura (segredos do repositorio). Com ela o APK novo
+      # instala por cima do anterior. Release sem a chave falha logo aqui, antes
+      # da compilacao, para nao publicar um APK que nao atualiza o instalado.
+      - name: Preparar a chave de assinatura
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/alice-release.p12"
+            echo "ALICE_KEYSTORE=$RUNNER_TEMP/alice-release.p12" >> "$GITHUB_ENV"
+            echo "Chave fixa encontrada."
+          elif [ -n "$RELEASE_TAG" ]; then
+            echo "::error::Faltam os segredos ANDROID_KEYSTORE_BASE64 e ANDROID_KEYSTORE_PASSWORD (ver android/README.md, Assinatura)."
+            exit 1
+          else
+            echo "::warning::Sem a chave fixa: o APK sai com uma chave de debug nova e nao instala por cima de outro."
+          fi
+
       # Dependências de sistema exigidas só para o CONFIGURE do preset desktop passar
       # (GLFW/GLEW checam X11/OpenGL na hora de configurar, mesmo que a gente só vá
       # compilar as 5 ferramentas de geração de código com esse preset, não o jogo todo).
@@ -123,7 +142,15 @@ jobs:
       # o Android SDK ja vem instalado no runner ubuntu-latest (ANDROID_HOME)
       - name: Gerar o APK
         working-directory: android
+        env:
+          ALICE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: ./gradlew assembleDebug --no-daemon
+
+      - name: Conferir a assinatura do APK
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs \
+            android/app/build/outputs/apk/debug/app-debug.apk | grep -E "Signer #1 certificate (DN|SHA-256)"
 
       - name: Publicar o APK
         uses: actions/upload-artifact@v4

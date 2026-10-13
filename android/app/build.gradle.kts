@@ -63,11 +63,30 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // Chave fixa: com ela todo APK sai com a mesma assinatura e uma versao nova
+    // instala por cima da anterior. O workflow a monta a partir dos segredos
+    // ANDROID_KEYSTORE_BASE64 e ANDROID_KEYSTORE_PASSWORD (ver android/README.md).
+    // Sem ALICE_KEYSTORE, assina com a chave de debug da maquina.
+    val aliceKeystore = System.getenv("ALICE_KEYSTORE")?.takeIf { it.isNotEmpty() }
+    signingConfigs {
+        if (aliceKeystore != null) {
+            create("alice") {
+                storeFile = file(aliceKeystore)
+                storePassword = System.getenv("ALICE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ALICE_KEY_ALIAS") ?: "alice"
+                keyPassword = System.getenv("ALICE_KEY_PASSWORD") ?: System.getenv("ALICE_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
+        val signing = signingConfigs.getByName(if (aliceKeystore != null) "alice" else "debug")
+        debug {
+            signingConfig = signing
+        }
         release {
             isMinifyEnabled = false
-            // ainda sem chave de release propria -- assina com a chave de debug
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signing
         }
     }
 
