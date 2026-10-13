@@ -95,7 +95,7 @@ O workflow `.github/workflows/android-port-fase1.yml` roda manualmente. Na aba *
 
 O Android só instala um APK por cima de outro se os dois tiverem a mesma assinatura. Sem chave própria, cada execução do Actions assina com uma chave de debug nova, e o usuário precisa desinstalar o app (perdendo saves e configurações) a cada versão. Com a chave fixa guardada nos segredos do repositório, toda versão nova atualiza a anterior.
 
-Um release (campo **Tag do release** preenchido) **exige** a chave: sem ela o workflow para logo no início. Um build sem tag continua funcionando sem a chave, com um aviso.
+Um release (campo **Tag do release** preenchido) **exige** a chave: sem ela o workflow para logo no início, a não ser que a opção **release_sem_chave** esteja marcada. Um build sem tag continua funcionando sem a chave, com um aviso.
 
 **1. Criar a chave** (uma vez só), num PC com JDK (o `keytool` vem com o Java e com o Android Studio) ou no próprio celular pelo [Termux](https://termux.dev) (`pkg install openjdk-17`):
 

@@ -16,7 +16,7 @@ Versão de testes do **Project Alice para Android**: o motor de código aberto p
 4. Abra o app, toque em **Escolher pasta**, ative **Acesso a todos os arquivos**, volte ao app e escolha a pasta do jogo.
 5. Na primeira vez o app monta o cenário, o que pode levar vários minutos.
 
-**Vindo da v0.4 ou anterior?** Esta versão não instala por cima delas: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.5 uma vez. **É a última vez:** a partir da v0.5 o APK é assinado sempre com a mesma chave, e as próximas versões instalam por cima, mantendo saves e configurações.
+**Já tem uma versão anterior instalada?** Esta versão não instala por cima dela: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.5 uma vez.
 
 ## Controles
 
@@ -34,7 +34,6 @@ Mouse e teclado físicos também funcionam.
 
 ## Novidades desta versão
 
-- **Atualizações sem desinstalar:** o APK passa a ser assinado sempre com a mesma chave. Depois de instalar a v0.5, as próximas versões instalam por cima dela.
 - **Resposta mais rápida ao toque com o jogo rodando:** a parte do app que lê o toque e desenha a tela ganhou prioridade sobre a simulação, que antes disputava os mesmos núcleos do processador.
 - **Contador de desempenho:** toque com três dedos para ver FPS, tempo dos quadros, velocidade do jogo e dias simulados por segundo. Toque de novo para esconder.
 - Continua com tudo da v0.4, incluindo a sincronização com o Project Alice original.
