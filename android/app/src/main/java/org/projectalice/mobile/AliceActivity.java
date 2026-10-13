@@ -10,11 +10,14 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
+import android.graphics.Typeface;
 import android.view.Gravity;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.widget.LinearLayout;
+import android.widget.PopupWindow;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -44,6 +47,8 @@ public class AliceActivity extends NativeActivity {
 
 	private final Handler uiHandler = new Handler(Looper.getMainLooper());
 	private AlertDialog loadingDialog = null;
+	private PopupWindow statsPopup = null;
+	private TextView statsText = null;
 	private Runnable pendingLoadingDialog = null;
 
 	@Override
@@ -148,6 +153,42 @@ public class AliceActivity extends NativeActivity {
 			.create();
 		loadingDialog.setCanceledOnTouchOutside(false);
 		loadingDialog.show();
+	}
+
+	/**
+	 * Contador de desempenho (ligado com toque de tres dedos), atualizado pela
+	 * thread nativa uma vez por segundo. Fica numa janela propria por cima do
+	 * jogo, porque a NativeActivity desenha direto na superficie e nao mostra
+	 * views comuns. Nao recebe toques. Texto vazio fecha.
+	 */
+	public void setStats(final String text) {
+		runOnUiThread(() -> {
+			if(text == null || text.isEmpty()) {
+				if(statsPopup != null) {
+					statsPopup.dismiss();
+					statsPopup = null;
+					statsText = null;
+				}
+				return;
+			}
+			if(statsPopup == null) {
+				if(isFinishing())
+					return;
+				int padding = (int)(4 * getResources().getDisplayMetrics().density);
+				statsText = new TextView(this);
+				statsText.setTextColor(0xFFFFFFFF);
+				statsText.setBackgroundColor(0xA0000000);
+				statsText.setTypeface(Typeface.MONOSPACE);
+				statsText.setTextSize(12);
+				statsText.setPadding(padding, padding, padding, padding);
+				statsPopup = new PopupWindow(statsText, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, false);
+				statsPopup.setTouchable(false);
+				statsText.setText(text);
+				statsPopup.showAtLocation(getWindow().getDecorView(), Gravity.TOP | Gravity.END, padding, padding);
+				return;
+			}
+			statsText.setText(text);
+		});
 	}
 
 	/** Mensagem curta na tela (ex.: "Criando o cenario..."). */

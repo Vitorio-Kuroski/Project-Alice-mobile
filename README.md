@@ -33,6 +33,7 @@ Versão para Android do [Project Alice](https://github.com/schombert/Project-Ali
 | Arrastar sobre a interface | Arrastar com o botão esquerdo |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom |
+| Toque com três dedos | Mostra ou esconde o contador de desempenho (FPS) |
 | Voltar | ESC (menu) |
 
 Mouse e teclado físicos também funcionam.

@@ -21,6 +21,7 @@
 //   arrastar sobre a interface  -> arrasto com o botao esquerdo (barras, janelas)
 //   arrastar sobre o mapa       -> arrasto com o botao do meio (move o mapa)
 //   dois dedos                  -> pinca = zoom (roda do mouse), mover = arrasta o mapa
+//   tres dedos                  -> mostra/esconde o contador de desempenho
 //   botao/gesto de voltar       -> ESC
 // Mouse e teclado fisicos (USB/Bluetooth) tambem funcionam.
 
@@ -35,8 +36,11 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl32.h>
+#include <sys/resource.h>
+#include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 
@@ -513,6 +517,65 @@ void start_flash(touch_tracker::flash f) {
 	touch.flash_time = std::chrono::steady_clock::now();
 }
 
+// Contador de desempenho: quadros por segundo, tempo medio e pior quadro, e
+// quantos dias do jogo passaram no ultimo segundo. O contador de FPS do proprio
+// jogo (comando "fps" do console) depende de um elemento de interface que nao
+// existe nos arquivos, entao este e mostrado pela AliceActivity.
+struct perf_counter {
+	bool visible = false;
+	std::chrono::steady_clock::time_point window_start;
+	std::chrono::steady_clock::time_point last_frame;
+	int32_t frames = 0;
+	float worst_ms = 0.f;
+	int32_t start_date = 0;
+};
+perf_counter perf;
+
+void toggle_perf_counter() {
+	perf.visible = !perf.visible;
+	perf.frames = 0;
+	perf.worst_ms = 0.f;
+	perf.window_start = perf.last_frame = std::chrono::steady_clock::now();
+	perf.start_date = -1;
+	android_set_stats(perf.visible ? "medindo..." : "");
+}
+
+void update_perf_counter(sys::state& state) {
+	if(!perf.visible)
+		return;
+	auto const now = std::chrono::steady_clock::now();
+	float const frame_ms = std::chrono::duration<float, std::milli>(now - perf.last_frame).count();
+	perf.last_frame = now;
+	int32_t const date = state.current_date.to_raw_value();
+	if(perf.start_date < 0 || frame_ms > 1000.f) {
+		// primeira medida, ou o app ficou parado em segundo plano: recomeca
+		perf.window_start = now;
+		perf.frames = 0;
+		perf.worst_ms = 0.f;
+		perf.start_date = date;
+		return;
+	}
+	perf.worst_ms = std::max(perf.worst_ms, frame_ms);
+	++perf.frames;
+
+	float const elapsed_ms = std::chrono::duration<float, std::milli>(now - perf.window_start).count();
+	if(elapsed_ms < 1000.f || perf.frames == 0)
+		return;
+	int32_t const speed = state.actual_game_speed.load(std::memory_order::relaxed);
+	char speed_text[24] = "pausado";
+	if(speed > 0)
+		snprintf(speed_text, sizeof(speed_text), "velocidade %d", int(speed));
+	char text[128];
+	snprintf(text, sizeof(text), "FPS %.0f  quadro %.0f ms (pior %.0f)\n%s  dias/s %.1f",
+		float(perf.frames) * 1000.f / elapsed_ms, elapsed_ms / float(perf.frames), perf.worst_ms,
+		speed_text, float(date - perf.start_date) * 1000.f / elapsed_ms);
+	android_set_stats(text);
+	perf.window_start = now;
+	perf.frames = 0;
+	perf.worst_ms = 0.f;
+	perf.start_date = date;
+}
+
 int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 	int32_t const action = AMotionEvent_getAction(event);
 	int32_t const masked = action & AMOTION_EVENT_ACTION_MASK;
@@ -530,7 +593,12 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 		break;
 	}
 	case AMOTION_EVENT_ACTION_POINTER_DOWN: {
-		if(AMotionEvent_getPointerCount(event) == 2 && touch.current != touch_tracker::mode::ignore_until_up) {
+		if(AMotionEvent_getPointerCount(event) == 3 && touch.current != touch_tracker::mode::ignore_until_up) {
+			// terceiro dedo: desfaz a pinca que comecou com os dois primeiros
+			end_single_finger_gesture(state);
+			toggle_perf_counter();
+			touch.current = touch_tracker::mode::ignore_until_up;
+		} else if(AMotionEvent_getPointerCount(event) == 2 && touch.current != touch_tracker::mode::ignore_until_up) {
 			end_single_finger_gesture(state);
 			float mid_x, mid_y;
 			pinch_geometry(event, mid_x, mid_y, touch.pinch_last_distance);
@@ -914,6 +982,14 @@ void android_start_game(sys::state& state) {
 	state.on_create();
 	win.loading = false;
 	win.game_started = true;
+
+	// Esta thread le o toque e desenha. Com o tempo correndo, a simulacao ocupa
+	// todos os nucleos (thread do jogo + workers do TBB) e, com a mesma
+	// prioridade, o toque espera a vez. Prioridade de "display urgente", a mesma
+	// que o Android usa na thread de desenho dos apps. Fica para o fim: threads
+	// herdam a prioridade de quem as cria, e as do jogo ja foram criadas.
+	if(setpriority(PRIO_PROCESS, gettid(), -8) != 0)
+		ALICE_LOGE("nao foi possivel subir a prioridade da thread de desenho (errno %d)", errno);
 }
 
 void run_android_main_loop(sys::state& game_state, android_app* app) {
@@ -946,6 +1022,7 @@ void run_android_main_loop(sys::state& game_state, android_app* app) {
 		if(can_render(win)) {
 			update_touch(game_state);
 			render_frame(game_state);
+			update_perf_counter(game_state);
 		}
 	}
 

@@ -480,6 +480,10 @@ void android_set_loading(char const* message) {
 	alice_android::call_activity("setLoading", message ? message : "");
 }
 
+void android_set_stats(char const* text) {
+	alice_android::call_activity("setStats", text ? text : "");
+}
+
 void android_launcher_update(sys::state& state) {
 	using namespace alice_android;
 	auto& win = *state.win_ptr;

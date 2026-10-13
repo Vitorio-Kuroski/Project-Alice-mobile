@@ -57,6 +57,7 @@ Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **sa
 | Arrastar sobre a interface | Arrastar com o botão esquerdo (barras de rolagem, janelas) |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom (mover os dois dedos também arrasta o mapa) |
+| Toque com três dedos | Mostra ou esconde o contador de desempenho: FPS, tempo médio e pior quadro, velocidade do jogo e dias simulados por segundo |
 | Botão ou gesto de voltar | ESC (menu do jogo) |
 
 Mouse (com os três botões e a roda) e teclado físico, por USB ou Bluetooth, funcionam como no desktop.
