@@ -16,6 +16,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.ProgressBar;
@@ -50,6 +51,8 @@ public class AliceActivity extends NativeActivity {
 	private PopupWindow statsPopup = null;
 	private TextView statsText = null;
 	private Runnable pendingLoadingDialog = null;
+	private TextView loadingText = null;
+	private String loadingMessage = null;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -106,33 +109,43 @@ public class AliceActivity extends NativeActivity {
 	 * mesmo com o jogo travado, e enquanto esta aberta os toques vao para ela:
 	 * sem isso o Android mostrava "o app nao esta respondendo". So aparece se o
 	 * trabalho passar de 300 ms, para carregamentos rapidos nao piscarem.
+	 * Tambem mostra as etapas da abertura do app (extrair arquivos, montar e
+	 * carregar o cenario): com ela aberta, uma mensagem nova so troca o texto.
 	 * Mensagem vazia fecha.
 	 */
 	public void setLoading(final String message) {
 		runOnUiThread(() -> {
-			if(pendingLoadingDialog != null) {
-				uiHandler.removeCallbacks(pendingLoadingDialog);
-				pendingLoadingDialog = null;
-			}
 			if(message == null || message.isEmpty()) {
+				loadingMessage = null;
+				if(pendingLoadingDialog != null) {
+					uiHandler.removeCallbacks(pendingLoadingDialog);
+					pendingLoadingDialog = null;
+				}
 				if(loadingDialog != null) {
 					loadingDialog.dismiss();
 					loadingDialog = null;
+					loadingText = null;
 				}
 				return;
 			}
-			if(loadingDialog != null)
+			// aberta ou para abrir: so troca o texto (etapas do carregamento)
+			loadingMessage = message;
+			if(loadingDialog != null) {
+				loadingText.setText(message);
+				return;
+			}
+			if(pendingLoadingDialog != null)
 				return;
 			pendingLoadingDialog = () -> {
 				pendingLoadingDialog = null;
-				showLoadingDialog(message);
+				showLoadingDialog(loadingMessage);
 			};
 			uiHandler.postDelayed(pendingLoadingDialog, 300);
 		});
 	}
 
 	private void showLoadingDialog(String message) {
-		if(isFinishing())
+		if(isFinishing() || message == null)
 			return;
 		int padding = (int)(24 * getResources().getDisplayMetrics().density);
 		LinearLayout layout = new LinearLayout(this);
@@ -142,17 +155,30 @@ public class AliceActivity extends NativeActivity {
 		ProgressBar spinner = new ProgressBar(this);
 		spinner.setIndeterminate(true);
 		layout.addView(spinner);
-		TextView text = new TextView(this);
-		text.setText(message);
-		text.setTextSize(18);
-		text.setPadding(padding, 0, 0, 0);
-		layout.addView(text);
+		loadingText = new TextView(this);
+		loadingText.setText(message);
+		loadingText.setTextSize(18);
+		loadingText.setPadding(padding, 0, 0, 0);
+		layout.addView(loadingText);
 		loadingDialog = new AlertDialog.Builder(this)
 			.setView(layout)
 			.setCancelable(false)
 			.create();
 		loadingDialog.setCanceledOnTouchOutside(false);
+		// Uma janela de dialogo nova traz as barras do sistema de volta. Aberta
+		// sem foco, ja com as barras escondidas, e so depois recebe o foco.
+		Window window = loadingDialog.getWindow();
+		if(window != null)
+			window.setFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
 		loadingDialog.show();
+		if(window != null) {
+			WindowInsetsController controller = window.getInsetsController();
+			if(controller != null) {
+				controller.hide(WindowInsets.Type.systemBars());
+				controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+			}
+			window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+		}
 	}
 
 	/**

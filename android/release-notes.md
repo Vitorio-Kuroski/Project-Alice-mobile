@@ -16,7 +16,7 @@ Versão de testes do **Project Alice para Android**: o motor de código aberto p
 4. Abra o app, toque em **Escolher pasta**, ative **Acesso a todos os arquivos**, volte ao app e escolha a pasta do jogo.
 5. Na primeira vez o app monta o cenário, o que pode levar vários minutos.
 
-**Já tem uma versão anterior instalada?** Esta versão não instala por cima dela: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.5 uma vez.
+**Já tem uma versão anterior instalada?** Esta versão não instala por cima dela: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.6 uma vez.
 
 ## Controles
 
@@ -34,9 +34,9 @@ Mouse e teclado físicos também funcionam.
 
 ## Novidades desta versão
 
-- **Resposta mais rápida ao toque com o jogo rodando:** a parte do app que lê o toque e desenha a tela ganhou prioridade sobre a simulação, que antes disputava os mesmos núcleos do processador.
-- **Contador de desempenho:** toque com três dedos para ver FPS, tempo dos quadros, velocidade do jogo e dias simulados por segundo. Toque de novo para esconder.
-- Continua com tudo da v0.4, incluindo a sincronização com o Project Alice original.
+- **Janela "Carregando" durante toda a abertura:** na primeira vez, montar o cenário leva vários minutos. Antes, o aviso sumia em segundos e a tela ficava azul e vazia, parecendo travada. Agora a janela fica aberta até o jogo aparecer e mostra a etapa atual (preparar os arquivos, montar o cenário, carregar, iniciar).
+- A janela de carregamento não traz mais a barra de navegação do Android de volta por cima do jogo.
+- Continua com tudo da v0.5: resposta mais rápida ao toque com o jogo rodando e contador de desempenho (toque com três dedos).
 
 ## Limitações conhecidas
 
