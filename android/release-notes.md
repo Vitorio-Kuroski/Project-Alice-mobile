@@ -16,7 +16,7 @@ Versão de testes do **Project Alice para Android**: o motor de código aberto p
 4. Abra o app, toque em **Escolher pasta**, ative **Acesso a todos os arquivos**, volte ao app e escolha a pasta do jogo.
 5. Na primeira vez o app monta o cenário, o que pode levar vários minutos.
 
-**Já tem a v0.3 instalada?** Esta versão não instala por cima dela: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.4 uma vez.
+**Vindo da v0.4 ou anterior?** Esta versão não instala por cima delas: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.5 uma vez. **É a última vez:** a partir da v0.5 o APK é assinado sempre com a mesma chave, e as próximas versões instalam por cima, mantendo saves e configurações.
 
 ## Controles
 
@@ -34,9 +34,10 @@ Mouse e teclado físicos também funcionam.
 
 ## Novidades desta versão
 
-- **Sincronizado com o Project Alice original** ([schombert/Project-Alice](https://github.com/schombert/Project-Alice)): traz as 74 mudanças mais recentes do motor, com correções e ajustes de jogo e de interface.
-- Texto renderizado com o Harfbuzz 14.4, versão mais nova da biblioteca de fontes.
-- Continua com tudo da v0.3: Android 11+, build otimizado para GPUs de celular, escala da interface pela tela, tela cheia, correção dos painéis piscando nas Adreno, janela "Carregando..." e salvamento automático ao sair do app.
+- **Atualizações sem desinstalar:** o APK passa a ser assinado sempre com a mesma chave. Depois de instalar a v0.5, as próximas versões instalam por cima dela.
+- **Resposta mais rápida ao toque com o jogo rodando:** a parte do app que lê o toque e desenha a tela ganhou prioridade sobre a simulação, que antes disputava os mesmos núcleos do processador.
+- **Contador de desempenho:** toque com três dedos para ver FPS, tempo dos quadros, velocidade do jogo e dias simulados por segundo. Toque de novo para esconder.
+- Continua com tudo da v0.4, incluindo a sincronização com o Project Alice original.
 
 ## Limitações conhecidas
 
