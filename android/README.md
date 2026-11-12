@@ -40,6 +40,8 @@ Na primeira vez o app ajusta duas opções para o aparelho. As duas podem ser mu
 
 Para aliviar a GPU, o jogo **desenha em 75% da resolução da tela** e o hardware de vídeo do aparelho amplia a imagem, sem custo. Numa tela de 2340×1080, ele desenha em 1755×810, cerca de 44% menos pixels no shader do mapa, que é o mais pesado. O texto fica um pouco menos nítido. O valor fica em `render_scale` (`src/window/window.hpp`); ainda não há opção no jogo para mudá-lo.
 
+Para o processador, a parte do app que **lê o toque e desenha** a tela tem prioridade sobre a simulação e fica presa aos **núcleos rápidos**. Todas as outras threads (simulação, workers do TBB, som) ficam fora de um dos núcleos rápidos, que sobra livre para o desenho. No Snapdragon 675 (2 núcleos rápidos e 6 lentos), isso dá desenho nos núcleos 6–7 e simulação nos 0–6. Os núcleos são descobertos pela frequência máxima de cada um; sem essa informação, ou com menos de 4 núcleos, o Android decide sozinho. O contador de desempenho (três dedos) mostra a divisão em uso.
+
 ### Carregamentos
 
 Ao entrar na partida o jogo monta toda a interface de uma vez, e no celular isso leva alguns segundos. O mesmo vale para carregar um save. Nesses momentos aparece a janela **"Carregando..."** do Android. Ela recebe os toques enquanto o jogo está ocupado, o que evita o aviso de "o app não está respondendo".

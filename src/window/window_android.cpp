@@ -36,6 +36,8 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl32.h>
+#include <dirent.h>
+#include <sched.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
@@ -323,6 +325,7 @@ void handle_cmd(android_app* app, int32_t cmd) {
 		break;
 	case APP_CMD_GAINED_FOCUS:
 		win.has_focus = true;
+		cpus.apply_now = true;
 		if(win.game_started && state.user_settings.mute_on_focus_lost)
 			sound::resume_all(state);
 		break;
@@ -334,6 +337,7 @@ void handle_cmd(android_app* app, int32_t cmd) {
 	case APP_CMD_RESUME:
 		ALICE_LOGI("APP_CMD_RESUME");
 		win.resumed = true;
+		cpus.apply_now = true;
 		break;
 	case APP_CMD_PAUSE:
 		ALICE_LOGI("APP_CMD_PAUSE");
@@ -349,6 +353,143 @@ void handle_cmd(android_app* app, int32_t cmd) {
 	default:
 		break;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// nucleos do processador
+// ---------------------------------------------------------------------------
+//
+// Celulares misturam nucleos rapidos e lentos (no Snapdragon 675: 2 rapidos e
+// 6 lentos), e sem orientacao o Android pode deixar a thread que le o toque e
+// desenha num nucleo lento enquanto a simulacao ocupa os rapidos. Com o jogo
+// na tela:
+//  - a thread de desenho fica so nos nucleos rapidos;
+//  - todas as outras threads do app (simulacao, workers do TBB, som...) ficam
+//    fora de um dos nucleos rapidos, que sobra livre para o desenho.
+// Sem saber a frequencia de todos os nucleos, ou com menos de 4, nada muda.
+// O Android desfaz a afinidade quando o app troca de grupo (segundo plano e
+// volta), e threads novas herdam a de quem as cria: por isso ela e aplicada de
+// novo ao voltar ao primeiro plano e a cada poucos segundos.
+
+struct cpu_layout {
+	bool detected = false;
+	bool pin_render = false;          // desenho preso aos nucleos rapidos
+	bool restrict_simulation = false; // demais threads fora de um nucleo
+	cpu_set_t render;
+	cpu_set_t simulation;
+	std::string description;          // para o contador de desempenho
+	std::chrono::steady_clock::time_point last_apply;
+	bool apply_now = false;
+};
+cpu_layout cpus;
+
+int64_t cpu_max_freq_khz(int32_t cpu) {
+	char path[96];
+	snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", int(cpu));
+	FILE* f = fopen(path, "r");
+	if(!f)
+		return -1;
+	long long value = -1;
+	if(fscanf(f, "%lld", &value) != 1)
+		value = -1;
+	fclose(f);
+	return value;
+}
+
+std::string describe_cpu_set(cpu_set_t const& set, int32_t count) {
+	// "0-5,7"
+	std::string out;
+	for(int32_t i = 0; i < count; ++i) {
+		if(!CPU_ISSET(i, &set))
+			continue;
+		int32_t j = i;
+		while(j + 1 < count && CPU_ISSET(j + 1, &set))
+			++j;
+		if(!out.empty())
+			out += ',';
+		out += std::to_string(i);
+		if(j > i)
+			out += '-' + std::to_string(j);
+		i = j;
+	}
+	return out;
+}
+
+void detect_cpu_layout() {
+	cpus.detected = true;
+	int32_t const count = std::min(int32_t(sysconf(_SC_NPROCESSORS_CONF)), int32_t(CPU_SETSIZE));
+	std::vector<int64_t> freq(std::max(count, 0));
+	for(int32_t i = 0; i < count; ++i) {
+		freq[i] = cpu_max_freq_khz(i);
+		if(freq[i] <= 0) {
+			ALICE_LOGI("nucleos: frequencia do cpu%d desconhecida, afinidade nao muda", int(i));
+			return;
+		}
+	}
+	if(count < 4) {
+		ALICE_LOGI("nucleos: so %d, afinidade nao muda", int(count));
+		return;
+	}
+
+	int64_t const top = *std::max_element(freq.begin(), freq.end());
+	int64_t second = 0;
+	for(auto f : freq) {
+		if(f < top)
+			second = std::max(second, f);
+	}
+	int32_t top_count = 0;
+	for(auto f : freq)
+		top_count += f == top ? 1 : 0;
+	// com um unico nucleo "primo" o desenho tambem pode usar o grupo seguinte
+	int64_t const fast_min = (top_count == 1 && second > 0) ? second : top;
+
+	CPU_ZERO(&cpus.render);
+	CPU_ZERO(&cpus.simulation);
+	int32_t reserved = -1;
+	int32_t fast_count = 0;
+	for(int32_t i = 0; i < count; ++i) {
+		CPU_SET(i, &cpus.simulation);
+		if(freq[i] >= fast_min) {
+			CPU_SET(i, &cpus.render);
+			++fast_count;
+		}
+		if(freq[i] == top)
+			reserved = i; // o rapido de numero mais alto
+	}
+	CPU_CLR(reserved, &cpus.simulation);
+	cpus.restrict_simulation = true;
+	cpus.pin_render = fast_count < count; // todos iguais: so sobra um livre
+	cpus.description = "desenho " + (cpus.pin_render ? describe_cpu_set(cpus.render, count) : std::string("todos"))
+		+ ", simulacao " + describe_cpu_set(cpus.simulation, count);
+	ALICE_LOGI("nucleos: %s (max %lld kHz, %d rapidos de %d)", cpus.description.c_str(), (long long)top, int(fast_count), int(count));
+}
+
+// Chamada na thread de desenho.
+void apply_cpu_affinity() {
+	cpus.last_apply = std::chrono::steady_clock::now();
+	cpus.apply_now = false;
+	pid_t const self = gettid();
+	if(cpus.restrict_simulation) {
+		if(DIR* dir = opendir("/proc/self/task")) {
+			while(dirent* entry = readdir(dir)) {
+				pid_t const tid = pid_t(atoi(entry->d_name));
+				if(tid <= 0 || tid == self)
+					continue;
+				// ESRCH: a thread terminou; EINVAL: fora do grupo de nucleos do app
+				sched_setaffinity(tid, sizeof(cpu_set_t), &cpus.simulation);
+			}
+			closedir(dir);
+		}
+	}
+	if(cpus.pin_render && sched_setaffinity(0, sizeof(cpu_set_t), &cpus.render) != 0)
+		ALICE_LOGE("nucleos: nao foi possivel prender o desenho (errno %d)", errno);
+}
+
+void update_cpu_affinity(window_data_impl const& win) {
+	if(!cpus.restrict_simulation || !win.game_started)
+		return;
+	if(cpus.apply_now || std::chrono::steady_clock::now() - cpus.last_apply > std::chrono::seconds(5))
+		apply_cpu_affinity();
 }
 
 // ---------------------------------------------------------------------------
@@ -565,10 +706,11 @@ void update_perf_counter(sys::state& state) {
 	char speed_text[24] = "pausado";
 	if(speed > 0)
 		snprintf(speed_text, sizeof(speed_text), "velocidade %d", int(speed));
-	char text[128];
-	snprintf(text, sizeof(text), "FPS %.0f  quadro %.0f ms (pior %.0f)\n%s  dias/s %.1f",
+	char text[256];
+	snprintf(text, sizeof(text), "FPS %.0f  quadro %.0f ms (pior %.0f)\n%s  dias/s %.1f\nnucleos: %s",
 		float(perf.frames) * 1000.f / elapsed_ms, elapsed_ms / float(perf.frames), perf.worst_ms,
-		speed_text, float(date - perf.start_date) * 1000.f / elapsed_ms);
+		speed_text, float(date - perf.start_date) * 1000.f / elapsed_ms,
+		cpus.restrict_simulation ? cpus.description.c_str() : "padrao do Android");
 	android_set_stats(text);
 	perf.window_start = now;
 	perf.frames = 0;
@@ -990,6 +1132,11 @@ void android_start_game(sys::state& state) {
 	// herdam a prioridade de quem as cria, e as do jogo ja foram criadas.
 	if(setpriority(PRIO_PROCESS, gettid(), -8) != 0)
 		ALICE_LOGE("nao foi possivel subir a prioridade da thread de desenho (errno %d)", errno);
+
+	// e, pelo mesmo motivo, os nucleos (ver "nucleos do processador")
+	if(!cpus.detected)
+		detect_cpu_layout();
+	cpus.apply_now = true;
 }
 
 void run_android_main_loop(sys::state& game_state, android_app* app) {
@@ -1020,6 +1167,7 @@ void run_android_main_loop(sys::state& game_state, android_app* app) {
 		android_launcher_update(game_state);
 
 		if(can_render(win)) {
+			update_cpu_affinity(win);
 			update_touch(game_state);
 			render_frame(game_state);
 			update_perf_counter(game_state);
