@@ -211,7 +211,15 @@ void state::on_resize(int32_t x, int32_t y, window::window_state win_state) {
 	ogl::initialize_msaa(*this, x, y);
 
 	ogl::deinitialize_framebuffer_for_province_indices(*this);
+#ifdef __ANDROID__
+	// o passo das provincias tem o tamanho em que o mapa e desenhado (map_state::render)
+	if(map::android_map_scale < 0.999f && !ogl::msaa_enabled(*this))
+		ogl::initialize_framebuffer_for_province_indices(*this, map::android_map_size(x), map::android_map_size(y));
+	else
+		ogl::initialize_framebuffer_for_province_indices(*this, x, y);
+#else
 	ogl::initialize_framebuffer_for_province_indices(*this, x, y);
+#endif
 
 
 
@@ -688,7 +696,12 @@ void ui_cache::process_update(sys::state& state) {
 		update_slot(state, per_nation, updates_running);
 
 		if (!updates_running) {
+#ifdef __ANDROID__
+			// celular: acordar 1000 vezes por segundo sem trabalho gasta processador e bateria
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+#else
 			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
 			sleep_iterations = std::min(1000, (sleep_iterations + 1));
 		} else {
 			sleep_iterations = 0;
@@ -727,6 +740,23 @@ void state::render() { // called to render the frame may (and should) delay retu
 
 
 	auto game_state_was_updated = game_state_updated.exchange(false, std::memory_order::acq_rel);
+#ifdef __ANDROID__
+	// No celular, com o tempo correndo, refazer todas as janelas abertas a cada
+	// dia simulado pesa na thread que tambem le o toque: no maximo 5 vezes por
+	// segundo. Pausado, atualiza na hora, para os comandos do jogador aparecerem
+	// sem atraso.
+	{
+		static auto last_full_update = std::chrono::steady_clock::time_point{};
+		auto const now = std::chrono::steady_clock::now();
+		bool const running = actual_game_speed.load(std::memory_order::relaxed) > 0 && !ui_pause.load(std::memory_order::relaxed);
+		if(game_state_was_updated && running && now - last_full_update < std::chrono::milliseconds(200)) {
+			game_state_updated.store(true, std::memory_order::release); // fica para um proximo quadro
+			game_state_was_updated = false;
+		} else if(game_state_was_updated) {
+			last_full_update = now;
+		}
+	}
+#endif
 	if(game_state_was_updated && !current_scene.starting_scene && !ui_state.lazy_load_in_game) {
 		window::change_cursor(*this, window::cursor_type::busy);
 		ui::create_in_game_windows(*this);
@@ -5554,7 +5584,13 @@ void state::game_loop() {
 						single_game_tick();
 					}
 				} else {
+#ifdef __ANDROID__
+					// dorme o que falta para o proximo dia (ate 5 ms), em vez de acordar a cada 1 ms
+					auto const remaining = int32_t(game_speed[speed] - ms_count);
+					std::this_thread::sleep_for(std::chrono::milliseconds(std::clamp(remaining, 1, 5)));
+#else
 					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
 				}
 			}
 		}

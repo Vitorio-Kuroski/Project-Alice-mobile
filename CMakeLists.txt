@@ -489,6 +489,8 @@ elseif(ANDROID)
 	target_link_libraries(AliceCommon INTERFACE dependency_icu)
 	# intrinsecas x86 (SSE/AVX) emuladas com NEON -- ver src/x86_compat/simde_x86.h
 	target_link_libraries(AliceCommon INTERFACE dependency_simde)
+	# ritmo de quadros (Swappy, do Android Game Development Kit) -- ver window_android.cpp
+	target_link_libraries(AliceCommon INTERFACE dependency_swappy)
 	# NativeActivity: a glue do NDK fornece o ANativeActivity_onCreate que chama android_main
 	add_library(android_native_app_glue STATIC
 		${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)

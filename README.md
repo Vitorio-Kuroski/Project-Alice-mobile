@@ -34,7 +34,7 @@ Versão para Android do [Project Alice](https://github.com/schombert/Project-Ali
 | Arrastar sobre a interface | Arrastar com o botão esquerdo |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom |
-| Toque com três dedos | Abre os **Ajustes do Android**: contador de desempenho, resolução do desenho, limite de FPS, vibração, mods |
+| Toque com três dedos | Abre os **Ajustes do Android**: modo econômico, contador de desempenho, resolução da interface e do mapa, limite de FPS, vibração, mods |
 | Voltar | ESC (menu) |
 
 Para digitar (nome de save, chat), toque no campo de texto do jogo: abre o teclado do Android.

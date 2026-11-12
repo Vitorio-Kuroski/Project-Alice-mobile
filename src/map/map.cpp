@@ -1008,7 +1008,11 @@ void display_data::render(
 	}
 
 
+#ifdef __ANDROID__
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, android_map_target_framebuffer());
+#else
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+#endif
 
 	if(ogl::msaa_enabled(state)) {
 		glBindFramebuffer(GL_FRAMEBUFFER, state.open_gl.msaa_framebuffer);
@@ -2386,6 +2390,96 @@ void display_data::render(
 	}
 
 }
+
+#ifdef __ANDROID__
+// Mapa em resolucao reduzida: um framebuffer proprio (cor + depth/stencil) do
+// tamanho reduzido. Antes do mapa, o que ja esta na tela (o fundo atras do
+// globo) e copiado para ele reduzido; depois, ele e ampliado de volta para a
+// janela com filtro linear, e a interface e desenhada por cima.
+namespace {
+struct android_lowres_target {
+	GLuint framebuffer = 0;
+	GLuint color = 0;
+	GLuint depth_stencil = 0;
+	int32_t width = 0;
+	int32_t height = 0;
+	bool active = false;
+};
+android_lowres_target android_lowres;
+
+void android_lowres_release() {
+	auto& t = android_lowres;
+	if(t.framebuffer)
+		glDeleteFramebuffers(1, &t.framebuffer);
+	if(t.color)
+		glDeleteTextures(1, &t.color);
+	if(t.depth_stencil)
+		glDeleteRenderbuffers(1, &t.depth_stencil);
+	t = android_lowres_target{};
+}
+}
+
+GLuint android_map_target_framebuffer() {
+	return android_lowres.active ? android_lowres.framebuffer : 0;
+}
+
+void android_map_lowres_begin(int32_t width, int32_t height, int32_t full_width, int32_t full_height) {
+	auto& t = android_lowres;
+	if(!t.framebuffer || t.width != width || t.height != height) {
+		android_lowres_release();
+		glGenTextures(1, &t.color);
+		glBindTexture(GL_TEXTURE_2D, t.color);
+		glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glGenRenderbuffers(1, &t.depth_stencil);
+		glBindRenderbuffer(GL_RENDERBUFFER, t.depth_stencil);
+		glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+		glGenFramebuffers(1, &t.framebuffer);
+		glBindFramebuffer(GL_FRAMEBUFFER, t.framebuffer);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.color, 0);
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, t.depth_stencil);
+		auto const status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		if(status != GL_FRAMEBUFFER_COMPLETE) {
+			android_lowres_release(); // segue desenhando direto na janela
+			return;
+		}
+		t.width = width;
+		t.height = height;
+	}
+	// a copia (blit) e o clear respeitam o recorte (scissor): fica desligado aqui
+	GLboolean const scissor = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, t.framebuffer);
+	glBlitFramebuffer(0, 0, full_width, full_height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	if(scissor)
+		glEnable(GL_SCISSOR_TEST);
+	t.active = true;
+}
+
+void android_map_lowres_end(int32_t full_width, int32_t full_height) {
+	auto& t = android_lowres;
+	if(!t.active)
+		return;
+	t.active = false;
+	GLboolean const scissor = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, t.framebuffer);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glBlitFramebuffer(0, 0, t.width, t.height, 0, 0, full_width, full_height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	if(scissor)
+		glEnable(GL_SCISSOR_TEST);
+	glViewport(0, 0, full_width, full_height);
+}
+#endif
 
 GLuint load_province_map(std::vector<uint16_t>& province_index, uint32_t size_x, uint32_t size_y) {
 	GLuint texture_handle;

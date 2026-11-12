@@ -102,8 +102,10 @@ public:
 	// render_height e o hardware de video do aparelho amplia para a tela
 	// (ANativeWindow_setBuffersGeometry), sem custo para a GPU. O shader do mapa
 	// e pesado (dezenas de leituras de textura por pixel) e a tela de um celular
-	// tem 2-3 milhoes de pixels; 0,75 desenha ~44% menos pixels.
-	float render_scale = 0.75f;
+	// tem 2-3 milhoes de pixels; 0,75 desenha ~44% menos pixels. Alem desta, o
+	// mapa tem escala propria (map::android_map_scale), para a interface poder
+	// ficar em resolucao cheia com o mapa leve.
+	float render_scale = 1.f; // a AliceActivity manda o valor salvo (padrao 100%); o mapa tem escala propria
 	int32_t physical_width = 0, physical_height = 0; // pixels da tela (coordenadas do toque)
 	int32_t render_width = 0, render_height = 0;     // pixels desenhados (coordenadas do jogo)
 	std::chrono::steady_clock::time_point last_background_save{};
@@ -138,7 +140,7 @@ void android_text_result(char const* text);
 void android_offer_continue(sys::state& state);
 void android_ask_continue();
 void android_continue_game();
-// ajuste vindo desse menu: render_scale (porcentagem), fps_limit (30/60), perf_counter (0/1)
+// ajuste vindo desse menu: render_scale e map_scale (porcentagem), fps_limit (30/60), perf_counter e light_graphics (0/1)
 void android_set_setting(char const* key, int32_t value);
 
 // Com o cenario carregado e uma superficie EGL ativa: inicia OpenGL, som e o

@@ -17,6 +17,7 @@ add_subdirectory(luajit)
 if (NOT WIN32)
 	if (ANDROID)
 		add_subdirectory(simde)
+		add_subdirectory(swappy)
 	else()
 		# GLFW nao suporta Android (nao ha X11/Wayland/Cocoa la) -- a janela/contexto
 		# no Android vem do NativeActivity + EGL (ver src/window/window_android.cpp)
