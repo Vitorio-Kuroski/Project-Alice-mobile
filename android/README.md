@@ -60,8 +60,10 @@ Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **sa
 | Arrastar sobre a interface | Arrastar com o botão esquerdo (barras de rolagem, janelas) |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom (mover os dois dedos também arrasta o mapa) |
-| Toque com três dedos | Abre os **Ajustes do Android**: contador de desempenho (FPS, tempo médio e pior quadro, velocidade do jogo, dias simulados por segundo e divisão dos núcleos), resolução do desenho e limite de FPS |
+| Toque com três dedos | Abre os **Ajustes do Android**: contador de desempenho (FPS, tempo médio e pior quadro, velocidade do jogo, dias simulados por segundo e divisão dos núcleos), resolução do desenho, limite de FPS e vibração |
 | Botão ou gesto de voltar | ESC (menu do jogo) |
+
+O toque longo dá uma vibração curta (desligável nos Ajustes do Android). Para **digitar** (nome de save, chat, busca), toque no campo de texto do jogo: abre uma janela com o teclado do Android, e o texto confirmado substitui o do campo.
 
 Mouse (com os três botões e a roda) e teclado físico, por USB ou Bluetooth, funcionam como no desktop.
 
