@@ -40,6 +40,10 @@ Na primeira vez o app ajusta duas opções para o aparelho. As duas podem ser mu
 
 Para aliviar a GPU, o jogo **desenha em 75% da resolução da tela** e o hardware de vídeo do aparelho amplia a imagem, sem custo. Numa tela de 2340×1080, ele desenha em 1755×810, cerca de 44% menos pixels no shader do mapa, que é o mais pesado. O texto fica um pouco menos nítido. Nos **Ajustes do Android** (toque com três dedos) dá para escolher 50%, 60%, 75% ou 100%, limitar o jogo a **30 FPS**, o que esquenta menos o celular, gasta menos bateria e deixa mais processador para a simulação. Lá também se desliga a vibração curta que confirma o toque longo. Os ajustes ficam salvos no app.
 
+O **Modo econômico** dos mesmos ajustes liga de uma vez 30 FPS, desenho em 60% e gráficos leves (mapa plano em vez do globo, metade das partículas das rotas de comércio); desligá-lo volta a 60 FPS, 75% e o globo. Os gráficos leves já vêm ligados na primeira execução e podem ser mudados nas opções do jogo.
+
+Com o tempo correndo, as janelas abertas do jogo são atualizadas no máximo **5 vezes por segundo** (no PC, a cada dia simulado), porque isso roda na mesma thread que lê o toque; com o jogo pausado, na hora. Threads que só esperam trabalho acordam menos vezes por segundo do que no PC.
+
 Para o processador, a parte do app que **lê o toque e desenha** a tela tem prioridade sobre a simulação e fica presa aos **núcleos rápidos**. Todas as outras threads (simulação, workers do TBB, som) ficam fora de um dos núcleos rápidos, que sobra livre para o desenho. No Snapdragon 675 (2 núcleos rápidos e 6 lentos), isso dá desenho nos núcleos 6–7 e simulação nos 0–6. Os núcleos são descobertos pela frequência máxima de cada um; sem essa informação, ou com menos de 4 núcleos, o Android decide sozinho. O contador de desempenho (três dedos) mostra a divisão em uso.
 
 ### Carregamentos
@@ -60,7 +64,7 @@ Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **sa
 | Arrastar sobre a interface | Arrastar com o botão esquerdo (barras de rolagem, janelas) |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom (mover os dois dedos também arrasta o mapa) |
-| Toque com três dedos | Abre os **Ajustes do Android**: contador de desempenho (FPS, tempo médio e pior quadro, velocidade do jogo, dias simulados por segundo e divisão dos núcleos), resolução do desenho, limite de FPS, vibração e **mods** |
+| Toque com três dedos | Abre os **Ajustes do Android**: modo econômico, contador de desempenho (FPS, tempo médio e pior quadro, velocidade do jogo, dias simulados por segundo e divisão dos núcleos), resolução do desenho, limite de FPS, vibração e **mods** |
 | Botão ou gesto de voltar | ESC (menu do jogo) |
 
 O toque longo dá uma vibração curta (desligável nos Ajustes do Android). Para **digitar** (nome de save, chat, busca), toque no campo de texto do jogo: abre uma janela com o teclado do Android, e o texto confirmado substitui o do campo.

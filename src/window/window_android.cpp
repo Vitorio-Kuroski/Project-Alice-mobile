@@ -113,6 +113,7 @@ int32_t g_swap_interval = 1;
 std::atomic<int32_t> pending_render_scale{ 0 }; // porcentagem; 0 = nada novo
 std::atomic<int32_t> pending_fps_limit{ 0 };    // 0 = nada novo
 std::atomic<int32_t> pending_perf_counter{ -1 }; // -1 = nada novo
+std::atomic<int32_t> pending_light_graphics{ -1 }; // -1 = nada novo; 0/1 = modo economico
 
 // ---------------------------------------------------------------------------
 // nucleos do processador
@@ -750,6 +751,15 @@ void update_perf_counter(sys::state& state) {
 	perf.start_date = date;
 }
 
+// Graficos leves para celular: mapa plano (o globo projeta cada vertice numa
+// esfera) e metade das particulas das rotas de comercio. Os mesmos campos do
+// menu de opcoes do jogo, que continua podendo muda-los.
+void apply_light_graphics(sys::state& state, bool light) {
+	state.user_settings.map_is_globe = light ? sys::projection_mode::rectangle : sys::projection_mode::globe_perspective;
+	state.user_settings.trade_particles_count = light ? 1 : 2;
+	state.user_setting_changed = true;
+}
+
 // Aplica o que mudou no menu de ajustes. Na thread de desenho (contexto EGL).
 void apply_pending_settings(sys::state& state) {
 	auto& win = *state.win_ptr;
@@ -765,6 +775,15 @@ void apply_pending_settings(sys::state& state) {
 	}
 	if(int32_t const perf_on = pending_perf_counter.exchange(-1); perf_on >= 0)
 		set_perf_counter(perf_on != 0);
+	if(win.game_started) {
+		if(int32_t const light = pending_light_graphics.exchange(-1); light >= 0) {
+			dispatch_to_game(state, [&] {
+				apply_light_graphics(state, light != 0);
+				state.save_user_settings();
+			});
+			ALICE_LOGI("modo economico %s", light ? "ligado" : "desligado");
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1286,6 +1305,8 @@ void android_set_setting(char const* key, int32_t value) {
 		pending_fps_limit.store(value);
 	else if(k == "perf_counter")
 		pending_perf_counter.store(value ? 1 : 0);
+	else if(k == "light_graphics")
+		pending_light_graphics.store(value ? 1 : 0);
 	else
 		ALICE_LOGE("ajuste desconhecido: %s", key ? key : "(nulo)");
 }
@@ -1316,9 +1337,11 @@ void android_start_game(sys::state& state) {
 		//    com um shader proprio; numa GPU de celular (tile-based) isso tira as
 		//    4 amostras de cada pixel do chip para a memoria a cada quadro.
 		state.user_settings.antialias_level = 0;
+		//  - graficos leves (mapa plano, menos particulas de comercio)
+		apply_light_graphics(state, true);
 		state.save_user_settings();
 		win.first_run_defaults = false;
-		ALICE_LOGI("primeira execucao: escala da interface %.2f (desenho %dx%d, %d dpi efetivos), MSAA desligado", state.user_settings.ui_scale, width, height, render_density);
+		ALICE_LOGI("primeira execucao: escala da interface %.2f (desenho %dx%d, %d dpi efetivos), MSAA desligado, graficos leves", state.user_settings.ui_scale, width, height, render_density);
 	}
 
 	state.on_resize(width, height, window_state::maximized);

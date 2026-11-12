@@ -91,6 +91,24 @@ public class AliceActivity extends NativeActivity {
 		return prefs.getInt("fps_limit", 60);
 	}
 
+	private boolean economyOn() {
+		return prefs.getBoolean("economy", false);
+	}
+
+	/**
+	 * Modo economico: 30 FPS, desenho em 60% e graficos leves (mapa plano,
+	 * menos particulas de comercio). Desligar volta aos padroes: 60 FPS, 75% e
+	 * o globo. Cada ajuste continua mudavel depois, aqui ou nas opcoes do jogo.
+	 */
+	private void setEconomy(boolean on) {
+		int fps = on ? 30 : 60;
+		int scale = on ? 60 : 75;
+		prefs.edit().putBoolean("economy", on).putInt("fps_limit", fps).putInt("render_scale", scale).apply();
+		nativeSetSetting("fps_limit", fps);
+		nativeSetSetting("render_scale", scale);
+		nativeSetSetting("light_graphics", on ? 1 : 0);
+	}
+
 	private boolean hapticOn() {
 		return prefs.getBoolean("haptic", true);
 	}
@@ -113,6 +131,7 @@ public class AliceActivity extends NativeActivity {
 		if(isFinishing())
 			return;
 		String[] items = {
+			"Modo econômico: " + (economyOn() ? "ligado" : "desligado"),
 			"Contador de desempenho: " + (perfCounterOn ? "ligado" : "desligado"),
 			"Resolução do desenho: " + renderScale() + "%",
 			"Limite de quadros: " + fpsLimit() + " FPS",
@@ -124,21 +143,24 @@ public class AliceActivity extends NativeActivity {
 			.setItems(items, (d, which) -> {
 				switch(which) {
 				case 0:
+					setEconomy(!economyOn());
+					break;
+				case 1:
 					perfCounterOn = !perfCounterOn;
 					nativeSetSetting("perf_counter", perfCounterOn ? 1 : 0);
 					break;
-				case 1:
+				case 2:
 					showRenderScaleDialog();
 					return;
-				case 2:
+				case 3:
 					int fps = fpsLimit() == 60 ? 30 : 60;
 					prefs.edit().putInt("fps_limit", fps).apply();
 					nativeSetSetting("fps_limit", fps);
 					break;
-				case 3:
+				case 4:
 					prefs.edit().putBoolean("haptic", !hapticOn()).apply();
 					break;
-				case 4:
+				case 5:
 					showModsDialog();
 					return;
 				}
