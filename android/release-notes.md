@@ -16,7 +16,7 @@ Versão de testes do **Project Alice para Android**: o motor de código aberto p
 4. Abra o app, toque em **Escolher pasta**, ative **Acesso a todos os arquivos**, volte ao app e escolha a pasta do jogo.
 5. Na primeira vez o app monta o cenário, o que pode levar vários minutos.
 
-**Já tem uma versão anterior instalada?** Esta versão não instala por cima dela: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.8 uma vez.
+**Já tem uma versão anterior instalada?** Esta versão não instala por cima dela: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.9 uma vez.
 
 ## Controles
 
@@ -37,13 +37,8 @@ Mouse e teclado físicos também funcionam.
 
 ## Novidades desta versão
 
-- **Texto nítido com o mapa leve:** só o mapa é desenhado em resolução menor; a interface fica em resolução cheia. Nos Ajustes do Android dá para escolher a resolução do mapa e a da interface separadamente.
-- **Ritmo de quadros regular:** os quadros saem em intervalos regulares (biblioteca Swappy do Android), com imagem mais lisa e menos atraso entre o toque e a tela.
-- **Modo econômico:** um toque nos Ajustes do Android liga 30 FPS, mapa em 50% e gráficos leves.
-- **Menos lentidão com o jogo rodando:** as janelas abertas são atualizadas no máximo 5 vezes por segundo, e não a cada dia simulado.
-- **Menos bateria com o jogo pausado:** sem toque, o app desenha só ~10 quadros por segundo; qualquer toque volta ao normal.
-- **Gráficos leves na primeira execução:** mapa plano e menos partículas de comércio (mudável nas opções do jogo).
-- Continua com tudo da v0.7: núcleos rápidos, seleção em caixa, digitar texto, vibração, Continuar e mods.
+- **Sincronizado com o Project Alice original** ([schombert/Project-Alice](https://github.com/schombert/Project-Alice)): traz as 224 mudanças mais recentes do motor, com melhorias de jogo e de interface (incluindo a interface militar) e correções.
+- Continua com tudo da v0.8: mapa em resolução reduzida com interface nítida, ritmo de quadros regular (Swappy), Modo econômico, menos quadros com o jogo pausado, núcleos rápidos, seleção em caixa, digitar texto, vibração, Continuar e mods.
 
 ## Limitações conhecidas
 
