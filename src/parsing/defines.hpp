@@ -674,11 +674,11 @@
 	LUA_DEFINES_LIST_ELEMENT(alice_auto_hire_generals, 1.00000)                                                                   \
 	LUA_DEFINES_LIST_ELEMENT(alice_ai_offensive_strength_overestimate, 1.000000) \
 	LUA_DEFINES_LIST_ELEMENT(alice_military_score_leadership_factor, 1.000000) \
-	LUA_DEFINES_LIST_ELEMENT(alice_lf_needs_scale, 1.000000) \
+	LUA_DEFINES_LIST_ELEMENT(alice_lf_needs_scale, 4.000000) \
 	LUA_DEFINES_LIST_ELEMENT(alice_ev_needs_scale, 1.000000) \
 	LUA_DEFINES_LIST_ELEMENT(alice_lx_needs_scale, 1.000000) \
 	LUA_DEFINES_LIST_ELEMENT(alice_max_event_iterations, 8.000000) \
-	LUA_DEFINES_LIST_ELEMENT(alice_needs_scaling_factor, 400000.000000) \
+	LUA_DEFINES_LIST_ELEMENT(alice_needs_scaling_factor, 200000.000000) \
 	LUA_DEFINES_LIST_ELEMENT(alice_factory_per_level_employment, 10000.0) \
 	LUA_DEFINES_LIST_ELEMENT(alice_domestic_investment_multiplier, 50.0) \
 	LUA_DEFINES_LIST_ELEMENT(alice_rgo_boost, 1.0) \
@@ -773,6 +773,29 @@
 	LUA_DEFINES_LIST_ELEMENT(alice_economy_presim_days, 730.0) \
 	LUA_DEFINES_LIST_ELEMENT(alice_combat_min_dice_roll, 0.0) \
 	LUA_DEFINES_LIST_ELEMENT(alice_combat_max_dice_roll, 9.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_base_land_supply_speed, 0.1) \
+	LUA_DEFINES_LIST_ELEMENT(alice_base_naval_supply_speed, 0.4) \
+	LUA_DEFINES_LIST_ELEMENT(alice_fastest_land_unit_supply_speed_mult, 1.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_fastest_transport_unit_supply_speed_mult, 1.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_sea_base_supply_thoughput, 1000.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_land_base_supply_thoughput , 0.1) \
+	LUA_DEFINES_LIST_ELEMENT(alice_supply_throughput_per_km_land_supply_speed, 1.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_supply_throughput_per_km_naval_supply_speed, 1.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_supply_throughput_infrastructure, 30.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_army_supply_throughput_blockade_threshold, 0.9) \
+	LUA_DEFINES_LIST_ELEMENT(alice_navy_port_supply_capacity_blockade_threshold, 10.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_base_land_supply_loss, 2.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_base_sea_supply_loss, 0.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_control_level_supply_loss, -2.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_militancy_supply_loss, 2.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_hostile_army_supply_loss, 0.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_max_supply_route_loss, 0.50) \
+	LUA_DEFINES_LIST_ELEMENT(alice_base_port_supply_capacity, 0.1) \
+	LUA_DEFINES_LIST_ELEMENT(alice_naval_base_port_supply_capacity, 5.0) \
+	LUA_DEFINES_LIST_ELEMENT(alice_civilian_port_throughput_capacity , 0.2) \
+	LUA_DEFINES_LIST_ELEMENT(alice_supply_throughput_from_movement_cost_mult, 2.5) \
+	LUA_DEFINES_LIST_ELEMENT(alice_supply_throughput_from_movement_cost_max_penalty, -0.95) \
+	LUA_DEFINES_LIST_ELEMENT(alice_trade_route_score_multiplier, 1.0) \
 
 // scales the needs values so that they are needs per this many pops
 // this value was arrived at by looking at farmers: 40'000 farmers produces enough grain to satisfy about 2/3

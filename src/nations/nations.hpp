@@ -9,8 +9,6 @@ enum class crisis_state : uint32_t;
 
 namespace nations {
 
-inline float naval_base_level_to_market_attractiveness = 0.25f;
-
 inline uint32_t tag_to_int(char first, char second, char third) {
 	return (uint32_t(first) << 16) | (uint32_t(second) << 8) | (uint32_t(third) << 0);
 }
@@ -158,7 +156,7 @@ dcon::nation_id get_nth_great_power(sys::state const& state, uint16_t n);
 
 dcon::nation_id owner_of_pop(sys::state const& state, dcon::pop_id pop_ids);
 
-bool is_commanding_subject_units(sys::state& state, dcon::nation_id subject, dcon::nation_id overlord);
+bool is_units_commanded_by_overlord(const sys::state& state, dcon::nation_id subject);
 
 bool can_release_as_vassal(sys::state const& state, dcon::nation_id n, dcon::national_identity_id releasable);
 bool identity_has_holder(sys::state const& state, dcon::national_identity_id ident);
@@ -167,12 +165,18 @@ dcon::nation_id get_relationship_partner(sys::state const& state, dcon::diplomat
 void update_cached_values(sys::state& state);
 void restore_unsaved_values(sys::state& state);
 void restore_state_instances(sys::state& state);
-void generate_initial_trade_routes(sys::state& state);
 void generate_initial_state_instances(sys::state& state);
-void generate_sea_trade_routes(sys::state& state);
-void recalculate_markets_distance(sys::state& state);
 
 dcon::text_key name_from_tag(sys::state& state, dcon::national_identity_id tag);
+
+template<concepts::construction_type con_type>
+int8_t get_nation_construction_consumption_setting_by_type(const sys::state& state, dcon::nation_id nation);
+
+
+template<typename unit_type, military::unit_consumption_type consumption_type>
+	requires(concepts::military_unit<unit_type> || concepts::military_subunit<unit_type>)
+int8_t get_nation_military_consumption_setting_by_type(const sys::state& state, dcon::nation_id nation);
+
 
 float trade_route_control_propagation(
 	sys::state const& state,
@@ -187,6 +191,8 @@ float admin_cost_of_province(sys::state const& state, dcon::province_id pid);
 float priority_national(sys::state& state, dcon::nation_id n, dcon::factory_type_id ftid);
 float priority_private(sys::state& state, dcon::nation_id n, dcon::factory_type_id ftid);
 
+float cb_justification_speed(const sys::state& state, dcon::nation_id nation, dcon::cb_type_id cb);
+
 float daily_research_points(sys::state& state, dcon::nation_id n);
 void update_research_points(sys::state& state);
 
@@ -194,6 +200,9 @@ void update_industrial_scores(sys::state& state);
 void update_military_scores(sys::state& state);
 void update_rankings(sys::state& state);
 void update_ui_rankings(sys::state& state);
+
+void init_rankings_lua(sys::state& state);
+void update_rankings_lua(sys::state& state);
 
 bool is_great_power(sys::state const& state, dcon::nation_id n);
 float prestige_score(sys::state const& state, dcon::nation_id n);
@@ -243,7 +252,7 @@ bool has_units_inside_other_nation(sys::state& state, dcon::nation_id nation_a, 
 bool can_put_flashpoint_focus_in_state(sys::state& state, dcon::state_instance_id s, dcon::nation_id fp_nation);
 int64_t get_monthly_pop_increase_of_nation(sys::state& state, dcon::nation_id n);
 bool can_accumulate_influence_with(sys::state& state, dcon::nation_id gp, dcon::nation_id target, dcon::gp_relationship_id rel);
-bool are_allied(sys::state& state, dcon::nation_id a, dcon::nation_id b);
+bool are_allied(const sys::state& state, dcon::nation_id a, dcon::nation_id b);
 bool is_landlocked(sys::state& state, dcon::nation_id n);
 
 bool nation_is_in_war(sys::state& state, dcon::nation_id nation, dcon::war_id war);
@@ -259,8 +268,10 @@ void create_nation_based_on_template(sys::state& state, dcon::nation_id n, dcon:
 // call after a nation loses its last province
 void cleanup_nation(sys::state& state, dcon::nation_id n);
 
+bool exists(const sys::state& state, dcon::nation_id nation);
+
+
 bool exists_or_is_utility_tag(sys::state& state, dcon::nation_id nation);
-ve::mask_vector exists_or_is_utility_tag(sys::state& state, ve::contiguous_tags<dcon::nation_id> nations);
 
 void adjust_prestige(sys::state& state, dcon::nation_id n, float delta);
 void do_embargo(sys::state& state, dcon::unilateral_relationship_id rel, bool notify = true);
@@ -319,6 +330,9 @@ void reject_crisis_participation(sys::state& state);
 void cleanup_crisis(sys::state& state);
 void cleanup_crisis_peace_offer(sys::state& state, dcon::peace_offer_id peace);
 void accept_crisis_peace_offer(sys::state& state, dcon::nation_id from, dcon::nation_id to, dcon::peace_offer_id peace);
+
+void get_existing_nations(const sys::state& state, std::vector<dcon::nation_id>& vec_out);
+std::vector<dcon::nation_id> get_existing_nations(const sys::state& state);
 
 void update_pop_acceptance(sys::state& state, dcon::nation_id n);
 void liberate_nation_from(sys::state& state, dcon::national_identity_id liberated, dcon::nation_id from);

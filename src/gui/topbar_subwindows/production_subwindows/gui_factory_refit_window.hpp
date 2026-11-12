@@ -5,6 +5,7 @@
 #include "construction.hpp"
 #include "gui_listbox_templates.hpp"
 #include "economy_stats.hpp"
+#include "culture_constants.hpp"
 
 namespace ui {
 
@@ -67,7 +68,7 @@ public:
 			if(refit_cost.commodity_type[i] && refit_cost.commodity_amounts[i] > 0) {
 				float factor = economy::factory_build_cost_multiplier(state, n, fat.get_province_from_factory_location(), false);
 				auto price =
-					economy::price(state, pid.get_state_membership(), refit_cost.commodity_type[i])
+					economy::price_slow(state, pid.get_state_membership(), refit_cost.commodity_type[i])
 					* refit_cost.commodity_amounts[i]
 					* factor;
 				total += price;

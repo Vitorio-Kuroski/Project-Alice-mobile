@@ -6,6 +6,9 @@
 #include "economy_production.hpp"
 #include "economy_stats.hpp"
 #include "province.hpp"
+#include "logistics.hpp"
+#include "gui_modifier_tooltips.hpp"
+#include "military_templates.hpp"
 
 namespace ui {
 
@@ -659,7 +662,7 @@ void supply_map_tt_box(sys::state& state, text::columnar_layout& contents, dcon:
 			text::add_space_to_layout_box(state, contents, box);
 			text::add_to_layout_box(state, contents, box, text::format_float(2.0f, 0), text::text_color::green);
 			text::add_line_break_to_layout_box(state, contents, box);
-		} else if(auto uni_rel = state.world.get_unilateral_relationship_by_unilateral_pair(prov_controller, state.local_player_nation); state.world.unilateral_relationship_get_military_access(uni_rel)) {
+		} else if(military::has_military_access_to(state, state.local_player_nation, prov_controller)) {
 			text::add_to_layout_box(state, contents, box, text::produce_simple_string(state, "supply_access"), text::text_color::white);
 			text::add_space_to_layout_box(state, contents, box);
 			text::add_to_layout_box(state, contents, box, text::format_float(2.0f, 0), text::text_color::green);
@@ -756,7 +759,7 @@ void migration_map_tt_box(sys::state& state, text::columnar_layout& contents, dc
 			dcon::nation_id n;
 		};
 		struct migration_display_data {
-			std::vector<float> total_migration;
+			tagged_vector<float, dcon::nation_id> total_migration;
 			std::vector<nation_and_value> positive_migration;
 			std::vector<nation_and_value> negative_migration;
 			float total_neg = 0;
@@ -778,12 +781,12 @@ void migration_map_tt_box(sys::state& state, text::columnar_layout& contents, dc
 			demographics::estimate_directed_immigration(state, owner, local_mig_data.total_migration);
 			for(uint32_t i = uint32_t(local_mig_data.total_migration.size()); i-- > 0; ) {
 				dcon::nation_id in{ dcon::nation_id::value_base_t(i) };
-				if(local_mig_data.total_migration[i] > 0.0f) {
-					local_mig_data.positive_migration.push_back(nation_and_value{ local_mig_data.total_migration[i],in });
-					local_mig_data.total_pos += local_mig_data.total_migration[i];
-				} else if(local_mig_data.total_migration[i] < 0.0f) {
-					local_mig_data.negative_migration.push_back(nation_and_value{ local_mig_data.total_migration[i],in });
-					local_mig_data.total_neg += local_mig_data.total_migration[i];
+				if(local_mig_data.total_migration[in] > 0.0f) {
+					local_mig_data.positive_migration.push_back(nation_and_value{ local_mig_data.total_migration[in],in });
+					local_mig_data.total_pos += local_mig_data.total_migration[in];
+				} else if(local_mig_data.total_migration[in] < 0.0f) {
+					local_mig_data.negative_migration.push_back(nation_and_value{ local_mig_data.total_migration[in],in });
+					local_mig_data.total_neg += local_mig_data.total_migration[in];
 				}
 			}
 
@@ -796,11 +799,21 @@ void migration_map_tt_box(sys::state& state, text::columnar_layout& contents, dc
 
 			display_data.insert_or_assign(owner, std::move(local_mig_data));
 		}
-
 		const migration_display_data& migration_display = display_data.at(owner);
+		{ 
+			float net_change = migration_display.total_pos + migration_display.total_neg;
+			text::text_color net_change_color = (net_change > 0.0f ? text::text_color::green : text::text_color::red);
+			auto box = text::open_layout_box(contents);
+			text::add_line_break_to_layout_box(state, contents, box);
+			text::add_to_layout_box(state, contents, box, text::produce_simple_string(state, "monthly_net_migration_lab"));
+			text::add_space_to_layout_box(state, contents, box);
+			text::add_to_layout_box(state, contents, box, int64_t(net_change), net_change_color);
+			text::close_layout_box(contents, box);
+		}
 
 		text::add_line_break_to_layout(state, contents);
 		text::add_line(state, contents, "monthly_immigration_lab");
+		text::add_line_break_to_layout(state, contents);
 		float total_accounted_for = 0.0f;
 		for(uint32_t i = 0; i < migration_display.positive_migration.size() && i < 10; ++i) {
 			total_accounted_for += migration_display.positive_migration[i].v;
@@ -846,6 +859,124 @@ void migration_map_tt_box(sys::state& state, text::columnar_layout& contents, dc
 		}
 	}
 }
+
+
+
+
+void supply_loss_map_tt_box(sys::state& state, text::columnar_layout& contents, dcon::province_id prov) {
+	if(prov) {
+		country_name_box(state, contents, prov);
+		auto local_nation = state.local_player_nation;
+		auto is_sea = province::is_sea(state, prov);
+		auto fat = dcon::fatten(state.world, prov);
+		float total = logistics::calculate_supply_loss_in_province(state, prov, local_nation);
+		bool header = false;
+		text::add_line(state, contents, "supply_loss_total_tooltip", text::variable_type::value, text::fp_one_place{ total }, 0);
+		ui::active_modifiers_description(state, contents, prov, 8, sys::provincial_mod_offsets::supply_loss_add, header);
+		if(is_sea) {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_naval_supply_loss_add, header);
+		} else {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_land_supply_loss_add, header);
+		}
+		ui::active_modifiers_description(state, contents, prov, 8, sys::provincial_mod_offsets::supply_loss_percent, header);
+		if(is_sea) {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_naval_supply_loss_percent, header);
+		} else {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_land_supply_loss_percent, header);
+		}
+		ui::active_modifiers_description(state, contents, prov, 8, sys::provincial_mod_offsets::supply_loss_mul, header);
+		if(is_sea) {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_naval_supply_loss_mul, header);
+		} else {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_land_supply_loss_mul, header);
+		}
+	}
+		
+}
+
+
+void supply_throughput_map_tt_box(sys::state& state, text::columnar_layout& contents, dcon::province_id prov) {
+	if(prov) {
+		country_name_box(state, contents, prov);
+		auto local_nation = state.local_player_nation;
+		auto is_sea = province::is_sea(state, prov);
+		auto fat = dcon::fatten(state.world, prov);
+		bool header = false;
+		float total = logistics::calculate_supply_throughput_in_province(state, prov, local_nation);
+		text::add_line(state, contents, "supply_throughput_total_tooltip", text::variable_type::value, text::fp_two_places{ total }, 0);
+		ui::active_modifiers_description(state, contents, prov, 8, sys::provincial_mod_offsets::supply_throughput_add, header);
+		if(is_sea) {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_naval_supply_throughput_add, header);
+		}
+		else {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_land_supply_throughput_add, header);
+		}
+		ui::active_modifiers_description(state, contents, prov, 8, sys::provincial_mod_offsets::supply_throughput_percent, header);
+		if(is_sea) {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_naval_supply_throughput_percent, header);
+		} else {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_land_supply_throughput_percent, header);
+		}
+		ui::active_modifiers_description(state, contents, prov, 8, sys::provincial_mod_offsets::supply_throughput_mul, header);
+		if(is_sea) {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_naval_supply_throughput_mul, header);
+		} else {
+			ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_land_supply_throughput_mul, header);
+		}
+	}
+}
+
+void supply_route_efficiency_map_tt_box(sys::state& state, text::columnar_layout& contents, dcon::province_id prov) {
+	if(prov) {
+		country_name_box(state, contents, prov);
+		text::add_line(state, contents, "supply_efficiency_header_tooltip");
+		auto fat = dcon::fatten(state.world, prov);
+		bool supply_access = province::has_supply_access_to_province(state, state.local_player_nation, prov);
+		bool fow_enabled = gamerule::nation_has_fow_enabled(state, state.local_player_nation);
+		
+		for(auto adj : fat.get_province_adjacency()) {
+			auto indx = (adj.get_connected_provinces(0).id != prov ? 0 : 1);
+			auto adj_prov = adj.get_connected_provinces(indx);
+			bool is_coastal_adj = (state.world.province_adjacency_get_type(adj) & province::border::coastal_bit) != 0;
+			// Only include provinces in the tooltip which are either not coastal border (land -> land or sea -> sea) and potentially lower displayed throughput if the province is a port
+			if(!is_coastal_adj || province::is_port_connected_to(state, prov, adj_prov) || province::is_port_connected_to(state, adj_prov, prov)) {
+				float available_throughput = logistics::calculate_supply_throughput_in_adjacency(state, adj, state.local_player_nation);
+				float used_throughput = adj.get_used_supply_throughput();
+				float sup_efficiency = logistics::supply_throughput_efficiency(state, adj, state.local_player_nation);
+				// Display question marks if we shouldn't be able to view it
+				if(supply_access || !fow_enabled) {
+					text::add_line(state, contents, "supply_efficiency_adjacency_tooltip", text::variable_type::prov, adj_prov.get_name(), text::variable_type::value, text::fp_one_place{ available_throughput }, text::variable_type::val, text::fp_one_place{ used_throughput }, text::variable_type::x, text::fp_percentage{ sup_efficiency }, 8);
+				}
+				else {
+					text::add_line(state, contents, "supply_efficiency_adjacency_tooltip", text::variable_type::prov, adj_prov.get_name(), text::variable_type::value, "???", text::variable_type::val, "???", text::variable_type::x, "???", 8);
+				}
+			}
+
+		}
+	}
+}
+
+void port_supply_capacity_map_tt_box(sys::state& state, text::columnar_layout& contents, dcon::province_id prov) {
+	if(prov && province::prov_is_coastal(state, prov)) {
+		country_name_box(state, contents, prov);
+		auto local_nation = state.local_player_nation;
+		auto is_sea = province::is_sea(state, prov);
+		auto fat = dcon::fatten(state.world, prov);
+		bool header = false;
+		float total = logistics::port_supply_capacity_in_province(state, prov, local_nation);
+		text::add_line(state, contents, "port_supply_capacity_total_tooltip", text::variable_type::value, text::fp_two_places{ total }, 0);
+		ui::active_modifiers_description(state, contents, prov, 8, sys::provincial_mod_offsets::port_supply_capacity_add, header);
+		ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_port_supply_capacity_add, header);
+
+		ui::active_modifiers_description(state, contents, prov, 8, sys::provincial_mod_offsets::port_supply_capacity_percent, header);
+		ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_port_supply_capacity_percent, header);
+
+		ui::active_modifiers_description(state, contents, prov, 8, sys::provincial_mod_offsets::port_supply_capacity_mul, header);
+		ui::active_modifiers_description(state, contents, local_nation, 8, sys::national_mod_offsets::national_port_supply_capacity_mul, header);
+	}
+}
+
+
 
 void civilsation_level_map_tt_box(sys::state& state, text::columnar_layout& contents, dcon::province_id prov) {    //Done
 	auto fat = dcon::fatten(state.world, prov);
@@ -1707,6 +1838,18 @@ void populate_map_tooltip(sys::state& state, text::columnar_layout& contents, dc
 		break;
 	case map_mode::mode::workforce:
 		workforce_map_tt_box(state, contents, prov);
+		break;
+	case map_mode::mode::supply_loss:
+		supply_loss_map_tt_box(state, contents, prov);
+		break;
+	case map_mode::mode::supply_throughput:
+		supply_throughput_map_tt_box(state, contents, prov);
+		break;
+	case map_mode::mode::port_supply_capacity:
+		port_supply_capacity_map_tt_box(state, contents, prov);
+		break;
+	case map_mode::mode::supply_route_efficiency:
+		supply_route_efficiency_map_tt_box(state, contents, prov);
 		break;
 	default:
 		break;

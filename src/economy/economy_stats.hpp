@@ -197,28 +197,28 @@ float trade_demand(sys::state const& state,
 	dcon::commodity_id c
 );
 
-float price(
+float price_slow(
 	sys::state const& state,
 	dcon::state_instance_id s,
 	dcon::commodity_id c
 );
 
-float price(
+float price_slow(
 	sys::state const& state,
 	dcon::nation_id s,
 	dcon::commodity_id c
 );
-float price(
+float price_slow(
 	sys::state const& state,
 	dcon::commodity_id c
 );
-float median_price(
+float median_price_slow(
 	sys::state const& state,
 	dcon::commodity_id c
 );
-float median_price(sys::state const& state, dcon::nation_id s, dcon::commodity_id c);
+float median_price_slow(sys::state const& state, dcon::nation_id s, dcon::commodity_id c);
 
-float price(
+float price_slow(
 	sys::state const& state,
 	dcon::market_id s,
 	dcon::commodity_id c
@@ -236,6 +236,16 @@ float supply(
 );
 float supply(
 	sys::state const& state,
+	dcon::commodity_id c
+);
+float production(
+	sys::state& state,
+	dcon::market_id s,
+	dcon::commodity_id c
+);
+float production(
+	sys::state& state,
+	dcon::nation_id s,
 	dcon::commodity_id c
 );
 
@@ -459,6 +469,6 @@ struct nation_monetary_breakdown {
 	float pops_cashback_education = 0.f;
 };
 
-nation_monetary_breakdown breakdown_nation_monetary_structure(sys::state& state, dcon::nation_id n);
+nation_monetary_breakdown breakdown_nation_monetary_structure(sys::state const& state, dcon::nation_id n);
 
 }

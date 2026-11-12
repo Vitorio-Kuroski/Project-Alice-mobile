@@ -13,6 +13,9 @@
 #include "money.hpp"
 #include "game_scene.hpp"
 #include "economy_government.hpp"
+#include "military_templates.hpp"
+#include "province.hpp"
+#include "trade_network.hpp"
 
 namespace ui {
 
@@ -170,8 +173,7 @@ public:
 	// Done
 	void button_action(sys::state& state, province_tile target, ui::element_base* parent) noexcept override {
 		auto army = state.world.regiment_get_army_from_army_membership(target.regiment);
-		state.selected_armies.clear();
-		state.selected_navies.clear();
+		game_scene::deselect_units(state);
 		state.select(army);
 		state.map_state.center_map_on_province(state, state.world.army_get_location_from_army_location(army));
 	}
@@ -198,7 +200,7 @@ public:
 			);
 
 			auto a = state.world.regiment_get_army_from_army_membership(target.regiment);
-			auto reinf = state.defines.pop_size_per_regiment * military::calculate_army_combined_reinforce<military::reinforcement_estimation_type::monthly>(state, a);
+			auto reinf = state.defines.pop_size_per_regiment * military::estimate_reinforcement<military::interval_estimation::monthly, military::supply_estimation::based_on_satisfaction, military::reinforcement_cap::capped_at_max_strength>(state, a);
 			if(reinf >= 2.0f) {
 				text::add_line(state, contents, "reinforce_rate", text::variable_type::x, int64_t(reinf));
 			} else {
@@ -240,6 +242,8 @@ public:
 	}
 };
 
+
+
 class province_port_tile : public tile_type_logic {
 public:
 	dcon::text_key get_name(sys::state& state, province_tile target) noexcept override {
@@ -262,6 +266,13 @@ public:
 	void update_tooltip(sys::state& state, int32_t x, int32_t y, text::columnar_layout& contents, province_tile target) noexcept override {
 		text::add_line(state, contents, "civilian_port");
 		text::add_line(state, contents, "civilian_port_size", text::variable_type::val, text::fp_one_place { state.world.province_get_advanced_province_building_max_private_size(target.province, advanced_province_buildings::list::civilian_ports) });
+
+		auto sid  = state.world.province_get_state_membership(target.province);
+		auto coast = province::state_get_coastal_capital(state, sid);
+		auto population_origin = state.world.state_instance_get_demographics(sid, demographics::total);
+		auto base_distance = trade_network::local_base_trade_distance(state, sid, coast, population_origin);
+		text::add_line(state, contents, "trade_route_base_distance", text::variable_type::val, text::prettify_float(base_distance));
+		text::add_line(state, contents, "trade_route_local_average_population", text::variable_type::val, text::prettify_float(trade_network::get_local_average_population(state, sid, coast, population_origin, base_distance)));
 	}
 };
 
@@ -370,12 +381,12 @@ public:
 
 		text::add_line(state, contents, "local_admin");
 
-		auto national_budget = state.world.nation_get_stockpiles(state.local_player_nation, economy::money);
+		auto national_budget = state.world.nation_get_treasury(state.local_player_nation);
 		auto admin_budget_approx = budget_priority * national_budget;
 		auto admin_count = economy::count_active_administrations(state, state.local_player_nation);
 		auto budget_per_administration = admin_count == 0.f ? 0.f : admin_budget_approx / admin_count;
 
-		text::add_line(state, contents, "local_admin_spending", text::variable_type::value, text::fp_currency{ economy::estimate_spendings_administration(state, n, budget_per_administration) });
+		text::add_line(state, contents, "local_admin_spending", text::variable_type::value, text::fp_currency{ economy::estimate_spendings_administration_after_refund(state, n, budget_per_administration) });
 
 		auto records = economy::explain_local_administration_employment(state, target.province);
 		for(auto record : records) {
@@ -417,12 +428,12 @@ public:
 
 		text::add_line(state, contents, "capital_admin");
 
-		auto national_budget = state.world.nation_get_stockpiles(state.local_player_nation, economy::money);
+		auto national_budget = state.world.nation_get_treasury(state.local_player_nation);
 		auto admin_budget_approx = budget_priority * national_budget;
 		auto admin_count = economy::count_active_administrations(state, state.local_player_nation);
 		auto budget_per_administration = admin_count == 0.f ? 0.f : admin_budget_approx / admin_count;
 
-		text::add_line(state, contents, "local_admin_spending", text::variable_type::value, text::fp_currency{ economy::estimate_spendings_administration_capital(state, n, budget_per_administration) });
+		text::add_line(state, contents, "local_admin_spending", text::variable_type::value, text::fp_currency{ economy::estimate_spendings_administration_capital_after_refund(state, n, budget_per_administration) });
 
 		text::add_line_break_to_layout(state, contents);
 
@@ -677,10 +688,8 @@ public:
 		auto reduced_multiplier = 0.2f;
 		auto coast_multiplier = is_coastal ? reduced_multiplier : normal_multiplier; // Coastal reduces decay by 20%
 		auto river_multiplier = has_major_river ? reduced_multiplier : normal_multiplier; // Rivers reduce decay by 20%
-		auto movement = std::max(
-			0.f,
-			state.world.province_get_modifier_values(pids, sys::provincial_mod_offsets::movement_cost) + 1.f
-		); // High movement cost increases decay
+		auto movement = province::movement_cost(state, pids);
+		 // High movement cost increases decay
 		auto attrition = std::max(
 			0.f,
 			state.world.province_get_modifier_values(pids, sys::provincial_mod_offsets::max_attrition) + 1.f
@@ -827,10 +836,13 @@ public:
 		text::add_line_break_to_layout(state, contents);
 
 		text::add_line(state, contents, "province_market_supply", text::variable_type::val, text::fp_two_places{ state.world.market_get_supply(market, target.commodity) });
+		text::add_line(state, contents, "province_market_historical_supply", text::variable_type::val, text::fp_two_places{ state.world.market_get_aggregated_supply_history(market, target.commodity) });
 		text::add_line(state, contents, "province_market_demand", text::variable_type::val, text::fp_two_places{ state.world.market_get_demand(market, target.commodity) });
+		text::add_line(state, contents, "province_market_historical_demand", text::variable_type::val, text::fp_two_places{ state.world.market_get_aggregated_demand_history(market, target.commodity) });
 		text::add_line(state, contents, "province_market_production", text::variable_type::val, text::fp_two_places{ std::max(0.f, state.world.market_get_supply(market, target.commodity) - economy::trade_supply(state, market, target.commodity)) });
 		text::add_line(state, contents, "province_market_consumption", text::variable_type::val, text::fp_two_places{ std::max(0.f, state.world.market_get_demand(market, target.commodity) - economy::trade_demand(state, market, target.commodity)) });
 		text::add_line(state, contents, "province_market_stockpiles", text::variable_type::val, text::fp_two_places{ state.world.market_get_stockpile(market, target.commodity) });
+		text::add_line(state, contents, "province_market_government_stockpiles", text::variable_type::val, text::fp_two_places{ state.world.market_get_government_stockpile(market, target.commodity) });
 		text::add_line(state, contents, "province_market_stockpiles_sales", text::variable_type::val, text::fp_two_places{ state.world.market_get_stockpile_sales(market, target.commodity) });
 		{
 			auto supply = state.world.market_get_supply(market, target.commodity);

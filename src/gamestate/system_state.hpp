@@ -410,6 +410,7 @@ struct user_settings_s {
 struct global_scenario_data_s { // this struct holds miscellaneous global properties of the scenario
 };
 
+
 struct cheat_data_s {
 	bool disable_ai = false;
 	bool disable_economy = false;
@@ -426,6 +427,7 @@ struct cheat_data_s {
 	bool province_names = false;
 
 	bool ecodump = false;
+	bool show_mil_routes = false;
 
 	std::string national_economy_dump_buffer;
 	std::string savings_buffer;
@@ -793,8 +795,8 @@ struct alignas(64) state {
 	// Lua scripting
 	//
 
-	lua_State* lua_ui_environment;
-	lua_State* lua_game_loop_environment;
+	lua_State* lua_ui_environment = nullptr;
+	lua_State* lua_game_loop_environment = nullptr;
 	std::vector<int> lua_on_daily_tick;
 	std::vector<int> lua_on_battle_end;
 	std::vector<int> lua_on_battle_tick;
@@ -806,6 +808,9 @@ struct alignas(64) state {
 	std::string lua_combined_script{};
 	std::string lua_game_loop_script{};
 	std::string lua_ui_script{};
+
+	int lua_nation_ranking_function_index = LUA_REFNIL;
+	int lua_nation_ranking_function_is_missing = false;
 
 	//
 	// Crisis data
@@ -1073,18 +1078,8 @@ struct alignas(64) state {
 
 	dcon::trigger_key commit_trigger_data(std::vector<uint16_t> data);
 	dcon::effect_key commit_effect_data(std::vector<uint16_t> data);
-
-	state() : untrans_key_to_text_sequence(0, text::vector_backed_ci_hash(key_data), text::vector_backed_ci_eq(key_data)), locale_key_to_text_sequence(0, text::vector_backed_ci_hash(key_data), text::vector_backed_ci_eq(key_data)), current_scene(game_scene::nation_picker()), singleplayer_commands(4096), new_n_event(1024), new_f_n_event(1024), new_p_event(1024), new_f_p_event(1024), new_requests(256), new_messages(2048), naval_battle_reports(256), land_battle_reports(256), error_windows(256), pending_log_messages(256) {
-
-
-		key_data.push_back(0);
-		logger_thread = start_logger_thread(); // create logger thread to handle incoming log message asynchronously
-	}
-
-	~state() {
-		quit_signaled.store(true, std::memory_order::release);
-		logger_thread.join(); // wait for logger thread to quit after signalling
-	}
+	state();
+	~state();
 
 	void save_user_settings() const;
 	void load_user_settings();
@@ -1140,7 +1135,15 @@ struct alignas(64) state {
 
 				// US6AC3 Reset selected army orders
 				ui_state.selected_army_order = military::special_army_order::none;
-				return;
+				break;
+			}
+		}
+		for(size_t i = ui_state.pending_shift_selected_armies.size(); i-- > 0;) {
+			if(ui_state.pending_shift_selected_armies[i] == a) {
+				ui_state.pending_shift_selected_armies[i] = ui_state.pending_shift_selected_armies.back();
+				ui_state.pending_shift_selected_armies.pop_back();
+				game_state_updated.store(true, std::memory_order_release);
+				break;
 			}
 		}
 	}
@@ -1150,7 +1153,15 @@ struct alignas(64) state {
 				selected_navies[i] = selected_navies.back();
 				selected_navies.pop_back();
 				game_state_updated.store(true, std::memory_order_release);
-				return;
+				break;
+			}
+		}
+		for(size_t i = ui_state.pending_shift_selected_navies.size(); i-- > 0;) {
+			if(ui_state.pending_shift_selected_navies[i] == a) {
+				ui_state.pending_shift_selected_navies[i] = ui_state.pending_shift_selected_navies.back();
+				ui_state.pending_shift_selected_navies.pop_back();
+				game_state_updated.store(true, std::memory_order_release);
+				break;
 			}
 		}
 	}
@@ -1216,5 +1227,7 @@ void selected_regiments_clear(sys::state& state);
 void selected_ships_remove(sys::state& state, dcon::ship_id ship);
 void selected_ships_add(sys::state& state, dcon::ship_id sh);
 void selected_ships_clear(sys::state& state);
+bool is_shift(virtual_key key);
+bool is_ctrl(virtual_key key);
 
 } // namespace sys

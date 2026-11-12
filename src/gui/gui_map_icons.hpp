@@ -9,6 +9,7 @@
 #include "gui_combat.hpp"
 #include "gui_units.hpp"
 #include "gui_lookup.hpp"
+#include "game_scene.hpp"
 
 namespace ui {
 
@@ -192,7 +193,7 @@ public:
 				color = outline_color::blue;
 			} else if(!controller || military::are_at_war(state, controller, state.local_player_nation)) {
 				color = outline_color::red;
-			} else if(military::are_allied_in_war(state, controller, state.local_player_nation)) {
+			} else if(military::are_on_same_side_in_common_war(state, controller, state.local_player_nation)) {
 				color = outline_color::cyan;
 			} else {
 				color = outline_color::gray;
@@ -210,7 +211,7 @@ public:
 					player_navy = true;
 				} else if(!controller || military::are_at_war(state, controller, state.local_player_nation)) {
 					enemy_navy = true;
-				} else if(military::are_allied_in_war(state, controller, state.local_player_nation)) {
+				} else if(military::are_on_same_side_in_common_war(state, controller, state.local_player_nation)) {
 					allied_navy = true;;
 				}
 
@@ -272,8 +273,7 @@ public:
 			if(state.ui_state.unit_details_box->for_province == port_for && state.ui_state.unit_details_box->is_visible() == true) {
 				state.ui_state.unit_details_box->set_visible(state, false);
 				if(!with_shift) {
-					state.selected_armies.clear();
-					state.selected_navies.clear();
+					game_scene::deselect_units(state);
 				} else {
 					for(auto n : state.world.province_get_navy_location(port_for)) {
 						state.deselect(n.get_navy().id);
@@ -281,19 +281,18 @@ public:
 				}
 			} else {
 				if(!with_shift) {
-					state.selected_armies.clear();
-					state.selected_navies.clear();
+					game_scene::deselect_units(state);
 				}
-
+				// Don't allow armies&navies to be selected at the same time, as it breaks other code assumptions
 				for(auto n : state.world.province_get_navy_location(port_for)) {
-					//if(n.get_navy().get_controller_from_navy_control() == state.local_player_nation) {
+					if(state.selected_armies.empty()) {
 						state.select(n.get_navy().id);
 						// Hide province window when navy is clicked.
 						if(state.ui_state.province_window) {
 							state.ui_state.province_window->set_visible(state, false);
 							state.set_selected_province(dcon::province_id{});
 						}
-					//}
+					}
 				}
 
 				auto location = get_absolute_non_mirror_location(state, *this);

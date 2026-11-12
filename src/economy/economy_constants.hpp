@@ -1,8 +1,21 @@
 #pragma once
 
+#include "culture_constants.hpp"
+
 namespace economy {
 
 constexpr inline float factories_per_state_required_city_size = 60'000.f;
+
+constexpr float stockpile_targets_demand_mult = 0.05f; // Stockpile targets demand will be multplied with this amount
+constexpr float max_army_required_spend = 1.5f; // Max percentage of current required army supplies the army budget will attempt to buy (1.5 = 150% of current required army supplies)
+constexpr float max_navy_required_spend = 1.5f; // Max percentage of current required navy supplies the army budget will attempt to buy (1.5 = 150% of current required navy supplies)
+constexpr float max_con_required_spend = 1.5f; // Max percentage of current required military construction supplies the mil. construction budget will attempt to buy (1.5 = 150% of current required mil. construction supplies)
+
+
+enum class price_estimation : uint8_t {
+	theoretical_max,
+	capped_by_availability
+};
 
 namespace numerical {
 namespace commodity_unit {
@@ -41,7 +54,7 @@ constexpr inline uint32_t can_invest = expand_factory | build_factory;
 
 // stockpile related things:
 inline constexpr float stockpile_to_supply = 1.f / 365.f / 3.f;
-inline constexpr float stockpile_spoilage = 1.f / 36500.f;
+inline constexpr float stockpile_spoilage = 1.f / 3650.f;
 inline constexpr float stockpile_expected_spending_per_commodity = 1'000.f;
 inline constexpr float market_savings_target = 1'000'000.f;
 inline constexpr float trade_transaction_soft_limit = 1'000.f;
@@ -63,4 +76,7 @@ inline constexpr float aristocrats_greed = 0.1f;
 inline constexpr float artisans_greed = 0.1f;
 inline constexpr float labor_greed_life = 0.1f;
 inline constexpr float capitalists_greed = 0.1f;
+
+inline constexpr float government_stockpile_spoilage = 0.001f; // Decay is 10x larger for govt stockpiles compared to market ones for balance, and to have some constant demand when stockpiling
+
 }

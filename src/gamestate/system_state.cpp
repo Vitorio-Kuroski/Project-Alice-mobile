@@ -37,9 +37,32 @@
 #include "alice_ui.hpp"
 #include "commands.hpp"
 #include "dcon_oos_reporter_generated.hpp"
+#include "logistics.hpp"
+#include "logistics_templates.hpp"
 #include "math_fns.hpp"
+#include "trade_network.hpp"
 
 namespace sys {
+
+
+state::state() : untrans_key_to_text_sequence(0, text::vector_backed_ci_hash(key_data), text::vector_backed_ci_eq(key_data)), locale_key_to_text_sequence(0, text::vector_backed_ci_hash(key_data), text::vector_backed_ci_eq(key_data)), current_scene(game_scene::nation_picker()), singleplayer_commands(4096), new_n_event(1024), new_f_n_event(1024), new_p_event(1024), new_f_p_event(1024), new_requests(256), new_messages(2048), naval_battle_reports(256), land_battle_reports(256), error_windows(256), pending_log_messages(256) {
+
+
+	key_data.push_back(0);
+	logger_thread = start_logger_thread(); // create logger thread to handle incoming log message asynchronously
+}
+
+state::~state() {
+	quit_signaled.store(true, std::memory_order::release);
+	// Usually not needed if the game is quit, but if multiple scenarios are being created in the same session, the state destructor might run multiple times. Also just good practice
+	if(lua_ui_environment) {
+		lua_close(lua_ui_environment);
+	}
+	if(lua_game_loop_environment) {
+		lua_close(lua_game_loop_environment);
+	}
+	logger_thread.join(); // wait for logger thread to quit after signalling
+}
 
 void state::start_state_selection(state_selection_data& data) {
 	state_selection = data;
@@ -60,6 +83,12 @@ glm::vec2 put_in_local(glm::vec2 new_point, glm::vec2 base_point, float size_x) 
 	} else {
 		return ladjx < radjx ? glm::vec2{ new_point.x - size_x, new_point.y } : glm::vec2{ new_point.x + size_x, new_point.y };
 	}
+}
+bool is_shift(virtual_key key) {
+	return key == virtual_key::SHIFT || key == virtual_key::LSHIFT || key == virtual_key::RSHIFT;
+}
+bool is_ctrl(virtual_key key) {
+	return key == virtual_key::CONTROL || key == virtual_key::LCONTROL || key == virtual_key::RCONTROL;
 }
 
 void state::start_national_identity_selection(national_identity_selection_data& data) {
@@ -239,9 +268,9 @@ void state::on_resize(int32_t x, int32_t y, window::window_state win_state) {
 }
 
 void state::on_key_down(virtual_key keycode, key_modifiers mod) {
-	if(keycode == virtual_key::CONTROL || keycode == virtual_key::LCONTROL || keycode == virtual_key::RCONTROL)
+	if(is_ctrl(keycode))
 		ui_state.ctrl_held_down = true;
-	if(keycode == virtual_key::SHIFT || keycode == virtual_key::LSHIFT || keycode == virtual_key::RSHIFT)
+	if(is_shift(keycode))
 		ui_state.shift_held_down = true;
 	if(keycode == virtual_key::ESCAPE && ui_state.current_drag_and_drop_data_type != ui::drag_and_drop_data::none) {
 		ui_state.current_drag_and_drop_data_type = ui::drag_and_drop_data::none;
@@ -252,9 +281,9 @@ void state::on_key_down(virtual_key keycode, key_modifiers mod) {
 }
 
 void state::on_key_up(virtual_key keycode, key_modifiers mod) {
-	if(keycode == virtual_key::CONTROL || keycode == virtual_key::LCONTROL || keycode == virtual_key::RCONTROL)
+	if(is_ctrl(keycode))
 		ui_state.ctrl_held_down = false;
-	if(keycode == virtual_key::SHIFT || keycode == virtual_key::LSHIFT || keycode == virtual_key::RSHIFT)
+	if(is_shift(keycode))
 		ui_state.shift_held_down = false;
 
 	//TODO: move to according scenes
@@ -268,8 +297,7 @@ void state::on_key_up(virtual_key keycode, key_modifiers mod) {
 		else if(keycode == sys::virtual_key::D)
 			keycode = sys::virtual_key::RIGHT;
 	}
-
-	map_state.on_key_up(keycode, mod);
+	game_scene::on_key_up(*this, keycode, mod);
 }
 void state::on_text(char32_t c) { // c is win1250 codepage value
 	if(ui_state.edit_target_internal)
@@ -757,11 +785,6 @@ void state::render() { // called to render the frame may (and should) delay retu
 		}
 	}
 #endif
-	if(game_state_was_updated && !current_scene.starting_scene && !ui_state.lazy_load_in_game) {
-		window::change_cursor(*this, window::cursor_type::busy);
-		ui::create_in_game_windows(*this);
-		window::change_cursor(*this, window::cursor_type::normal_cancel_busy);
-	}
 	// Process queued ui function invocations from command thread
 	auto* queued_func = ui_state.queued_invocations.front();
 	while(queued_func) {
@@ -1195,14 +1218,12 @@ void state::render() { // called to render the frame may (and should) delay retu
 }
 
 void state::on_create() {
-	// lua
-	lua_alice_api::set_state(this);
-	lua_alice_api::setup_gameloop_environment(*this);
+	// lua ui environment
 
 	lua_alice_api::setup_ui_environment(*this);
 
 
-	// populate the table with scripted functions from lua_combined_script and lua_ui_script (read during scenario generation)
+	// populate the table with scripted functions from lua_ui_script and the combined script (read during scenario generation)
 	{
 		int status;
 		status = luaL_dostring(lua_ui_environment, lua_combined_script.c_str());
@@ -1213,14 +1234,6 @@ void state::on_create() {
 			lua_settop(lua_ui_environment, 0);
 			std::abort();
 		}
-		status = luaL_dostring(lua_game_loop_environment, lua_combined_script.c_str());
-		if(status) {
-#ifdef _WIN32
-			OutputDebugStringA(lua_tostring(lua_game_loop_environment, -1));
-#endif
-			lua_settop(lua_game_loop_environment, 0);
-			std::abort();
-		}
 
 		status = luaL_dostring(lua_ui_environment, lua_ui_script.c_str());
 		if(status) {
@@ -1228,14 +1241,6 @@ void state::on_create() {
 			OutputDebugStringA(lua_tostring(lua_ui_environment, -1));
 #endif
 			lua_settop(lua_ui_environment, 0);
-			std::abort();
-		}
-		status = luaL_dostring(lua_game_loop_environment, lua_game_loop_script.c_str());
-		if(status) {
-#ifdef _WIN32
-			OutputDebugStringA(lua_tostring(lua_game_loop_environment, -1));
-#endif
-			lua_settop(lua_game_loop_environment, 0);
 			std::abort();
 		}
 	}
@@ -1286,6 +1291,9 @@ void state::on_create() {
 
 	ui::adjust_in_game_windows(*this);
 	map_mode::set_map_mode(*this, map_mode::mode::political);
+	// Create the ingame windows early, to prevent a message in the message loop to refer to a UI item before it has been created (nullptr deref).
+	// Could happen if the player clicked stuff while the game was transitioning from nation_picker to ingame_basic for the first time
+	ui::create_in_game_windows(*this); 
 }
 //
 // string pool functions
@@ -1863,8 +1871,8 @@ void state::update_ui_scale(float new_scale) {
 
 	if(ui_state.outliner_window)
 		ui_state.outliner_window->impl_on_update(*this);
-	if(current_scene.game_in_progress)
-		alice_ui::display_at_front<alice_ui::make_production_main>(*this, alice_ui::display_closure_command::return_pointer)->base_data.size.y = int16_t(y_size / user_settings.ui_scale);
+	//if(current_scene.game_in_progress)
+	//	alice_ui::display_at_front<alice_ui::make_production_main>(*this, alice_ui::display_closure_command::return_pointer)->base_data.size.y = int16_t(y_size / user_settings.ui_scale);
 
 	for(auto& s : ui_templates.backgrounds) {
 		s.renders.release_renders();
@@ -2212,6 +2220,11 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 			auto name_str = std::string(name);
 			context.map_of_commodity_names.insert_or_assign(name_str, cid);
 		});
+	}
+
+	{
+		// trade goods are set up, we are ready to emit related meta file
+		lua_alice_api::setup_trade_goods_enumeration(*this);
 	}
 
 	// read buildings.text
@@ -2722,22 +2735,50 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 			load_from_dir(subdir);
 		}
 	}
-
+	// Check each land province has an rgo, and no sea province or uncolonized provinces has any factories defined
 	province::for_each_land_province(*this, [&](dcon::province_id p) {
 		if(auto rgo = world.province_get_rgo(p); !rgo) {
 			auto name = world.province_get_name(p);
 			err.accumulated_errors += std::string("province ") + text::produce_simple_string(*this, name) + " is missing an rgo\n";
 			world.province_set_rgo(p, economy::money);
 		}
+		auto factories = world.province_get_factory_location(p);
+		bool has_owner = bool(world.province_get_nation_from_province_ownership(p));
+		if(!has_owner && factories.end() != factories.begin()) {
+			auto name = world.province_get_name(p);
+			err.accumulated_errors += std::string("Uncolonized province ") + text::produce_simple_string(*this, name) + " has factories defined\n";
+			while(factories.end() != factories.begin()) {
+				world.delete_factory((*factories.begin()).get_factory());
+			}
+		}
 	});
-	// check that all provinces are assigned to a state
+	province::for_each_sea_province(*this, [&](dcon::province_id p) {
+		if(auto rgo = world.province_get_rgo(p); rgo) {
+			auto name = world.province_get_name(p);
+			err.accumulated_errors += std::string("Sea province ") + text::produce_simple_string(*this, name) + " has an rgo defined\n";
+			world.province_set_rgo(p, dcon::commodity_id{ });
+		}
+		auto factories = world.province_get_factory_location(p);
+		auto name = world.province_get_name(p);
+		if(factories.end() != factories.begin()) {
+			err.accumulated_errors += std::string("Sea province ") + text::produce_simple_string(*this, name) + " has factories defined\n";
+			while(factories.end() != factories.begin()) {
+				world.delete_factory((*factories.begin()).get_factory());
+			}
+		}
+	});
+	// check that all land provinces are assigned to a state
 	// it's required to avoid issues with functions which assume that every land province is in a state
 	for(int32_t i = 0; i < province_definitions.first_sea_province.index(); i++) {
 		auto pid = dcon::province_id{ dcon::province_id::value_base_t(i) };
 		auto v2id = world.province_get_provid(pid);
-		if(world.province_get_nation_from_province_ownership(pid)) {
-			assert(world.abstract_state_membership_get_state(world.province_get_abstract_state_membership(pid)));
+		if (!world.province_get_state_from_abstract_state_membership(pid)) {
+			// Set the province to the first state defined as a placeholder, so the later code dosen't crash and burn before the fatal error is checked
+			world.province_set_state_from_abstract_state_membership(pid, dcon::state_definition_id{0 });
+			err.accumulated_errors += "Province with ID " + std::to_string(v2id) + " is not assigned to any state\n";
+			err.fatal = true;
 		}
+
 	}
 
 	culture::set_default_issue_and_reform_options(*this);
@@ -3057,6 +3098,8 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 	national_definitions.global_flag_variables.resize((national_definitions.num_allocated_global_flags + 7) / 8, dcon::bitfield_type{ 0 });
 	world.nation_resize_accepted_cultures(world.culture_size());
 
+	lua_alice_api::setup_nation_flag_enumeration(*this);
+
 	std::vector<std::pair<dcon::nation_id, dcon::decision_id>> pending_decisions;
 	// load country history
 	{
@@ -3121,7 +3164,7 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 
 	// misc touch ups
 	nations::generate_initial_state_instances(*this);
-	world.nation_resize_stockpiles(world.commodity_size());
+	province::reset_all_state_capitals(*this);
 	world.nation_resize_variables(uint32_t(national_definitions.num_allocated_national_variables));
 	world.pop_resize_udemographics(pop_demographics::size(*this));
 	national_definitions.global_flag_variables.resize((national_definitions.num_allocated_global_flags + 7) / 8, dcon::bitfield_type{ 0 });
@@ -3300,6 +3343,8 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 	world.market_resize_stockpile_sales(world.commodity_size());
 	world.market_resize_consumption(world.commodity_size());
 	world.market_resize_intermediate_demand(world.commodity_size());
+	world.market_resize_government_stockpile(world.commodity_size());
+	world.market_resize_government_stockpile_demand_weights(world.commodity_size());
 
 	world.market_resize_life_needs_costs(world.pop_type_size());
 	world.market_resize_everyday_needs_costs(world.pop_type_size());
@@ -3319,7 +3364,8 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 	world.market_resize_export(world.commodity_size());
 	world.market_resize_army_demand(world.commodity_size());
 	world.market_resize_navy_demand(world.commodity_size());
-	world.market_resize_construction_demand(world.commodity_size());
+	world.market_resize_government_construction_demand(world.commodity_size());
+	world.market_resize_government_stockpile_demand(world.commodity_size());
 	world.market_resize_private_construction_demand(world.commodity_size());
 	world.market_resize_actual_probability_to_buy(world.commodity_size());
 	world.market_resize_actual_probability_to_sell(world.commodity_size());
@@ -3347,9 +3393,16 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 	advanced_province_buildings::initialize_size_of_dcon_arrays(*this);
 
 	world.nation_resize_stockpile_targets(world.commodity_size());
+	world.nation_resize_total_stockpiles(world.commodity_size());
+	world.nation_resize_yesterday_total_stockpiles(world.commodity_size());
 	world.nation_resize_drawing_on_stockpiles(world.commodity_size());
 	world.commodity_resize_price_record(economy::price_history_length);
 	world.nation_resize_gdp_record(economy::gdp_history_length);
+
+	world.army_supply_route_resize_buffered_reinforcement_goods(world.unit_build_commodity_size());
+	world.army_supply_route_resize_buffered_supply_goods(world.unit_supply_commodity_size());
+	world.navy_supply_route_resize_buffered_reinforcement_goods(world.unit_build_commodity_size());
+	world.navy_supply_route_resize_buffered_supply_goods(world.unit_supply_commodity_size());
 
 	nations_by_rank.resize(2000); // TODO: take this value directly from the data container: max number of nations
 	nations_by_industrial_score.resize(2000);
@@ -3711,8 +3764,6 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 
 	demographics::fixup_state_only_pops<true>(*this);
 
-	military::reinforce_regiments(*this);
-	military::repair_ships(*this);
 
 
 	nations::update_national_administrative_efficiency(*this);
@@ -3723,23 +3774,29 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 	military::update_naval_supply_points(*this);
 	economy::update_employment(*this, true, 1.f);
 	nations::update_military_scores(*this); // depends on ship score, land unit average
-	nations::update_rankings(*this);		// depends on industrial score, military scores
 
 	economy::sanity_check(*this);
 
 	assert(great_nations.size() == 0);
-	uint32_t greatpowersfound = 0;
-	uint32_t i = 0;
-	while(greatpowersfound < uint32_t(defines.great_nations_count)) {
-		if(i >= nations_by_rank.size()) {
-			break;
+
+	if(!lua_nation_ranking_function_is_missing) {
+		nations::init_rankings_lua(*this);
+	}
+	if(lua_nation_ranking_function_is_missing) {
+		nations::update_rankings(*this);		// depends on industrial score, military scores
+		uint32_t greatpowersfound = 0;
+		uint32_t i = 0;
+		while(greatpowersfound < uint32_t(defines.great_nations_count)) {
+			if(i >= nations_by_rank.size()) {
+				break;
+			}
+			if(nations_by_rank[i] && world.overlord_get_ruler(world.nation_get_overlord_as_subject(nations_by_rank[i])) == dcon::nation_id()) {
+				great_nations.push_back(great_nation{ sys::date{0}, nations_by_rank[i] });
+				world.nation_set_is_great_power(nations_by_rank[i], true);
+				greatpowersfound++;
+			}
+			i++;
 		}
-		if(nations_by_rank[i] && world.overlord_get_ruler(world.nation_get_overlord_as_subject(nations_by_rank[i])) == dcon::nation_id()) {
-			great_nations.push_back(great_nation{ sys::date{0}, nations_by_rank[i] });
-			world.nation_set_is_great_power(nations_by_rank[i], true);
-			greatpowersfound++;
-		}
-		i++;
 	}
 
 	// fix slaves in non-slave owning nations
@@ -3747,11 +3804,13 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 		culture::fix_slaves_in_province(*this, p.get_nation_from_province_ownership(), p);
 	}
 
-	economy::sanity_check(*this);
+	military::update_fastest_units(*this);
 
 	economy::sanity_check(*this);
 
-	nations::generate_initial_trade_routes(*this);
+	economy::sanity_check(*this);
+
+	trade_network::generate_initial_trade_routes(*this);
 
 	economy::sanity_check(*this);
 
@@ -3762,8 +3821,23 @@ void state::load_scenario_data(parsers::error_handler& err, sys::year_month_day 
 	// ai::update_ai_research(*this);
 	ai::update_influence_priorities(*this);
 	ai::update_focuses(*this);
+	// Right now we dont need to do any military or logistics related updates on scenario creation, since it won't do anything anyway
+	/*logistics::update_supply_routes_daily(*this);
 
-	military::recover_org(*this);
+
+	military::reinforce_regiments(*this);
+
+	concurrency::parallel_invoke(
+		[&]() {
+			military::recover_land_org(*this);
+		},
+		[&]() {
+			military::recover_naval_org(*this);
+		},
+		[&]() {
+			military::repair_ships(*this);
+		}
+	);*/
 
 	military::set_initial_leaders(*this);
 
@@ -4260,6 +4334,33 @@ void state::on_scenario_load() {
 
 	ui_state.rebel_flags.resize(world.ideology_size(), 0);
 
+	// Lua init. Save lua ui environment for later when UI is available
+
+	lua_alice_api::set_state(this);
+	lua_alice_api::setup_gameloop_environment(*this);
+	lua_alice_api::setup_trade_goods_enumeration(*this);
+	lua_alice_api::setup_nation_flag_enumeration(*this);
+	// populate the table with scripted functions from lua_combined_script (read during scenario generation). Do ui script later when UI is available
+	{
+		int status;
+		status = luaL_dostring(lua_game_loop_environment, lua_combined_script.c_str());
+		if(status) {
+#ifdef _WIN32
+			OutputDebugStringA(lua_tostring(lua_game_loop_environment, -1));
+#endif
+			lua_settop(lua_game_loop_environment, 0);
+			std::abort();
+		}
+		status = luaL_dostring(lua_game_loop_environment, lua_game_loop_script.c_str());
+		if(status) {
+#ifdef _WIN32
+			OutputDebugStringA(lua_tostring(lua_game_loop_environment, -1));
+#endif
+			lua_settop(lua_game_loop_environment, 0);
+			std::abort();
+		}
+	}
+
 	if(network_mode != network_mode_type::single_player)
 		return;
 
@@ -4587,6 +4688,31 @@ void state::fill_unsaved_data() { // reconstructs derived values that are not di
 	world.state_instance_resize_demographics_alt(demographics::size(*this));
 	world.province_resize_demographics_alt(demographics::size(*this));
 
+	world.market_resize_commodity_float_buffer_1(world.commodity_size());
+
+	world.nation_resize_commodity_float_buffer_1(world.commodity_size());
+	world.nation_resize_commodity_float_buffer_2(world.commodity_size());
+	world.nation_resize_commodity_float_buffer_3(world.commodity_size());
+	world.nation_resize_unit_supply_and_build_commodity_float_buffer_1(world.unit_supply_and_build_commodity_size());
+	world.nation_resize_unit_supply_and_build_commodity_float_buffer_2(world.unit_supply_and_build_commodity_size());
+	world.nation_resize_unit_supply_and_build_commodity_float_buffer_3(world.unit_supply_and_build_commodity_size());
+	world.nation_resize_unit_supply_and_build_commodity_float_buffer_4(world.unit_supply_and_build_commodity_size());
+
+	world.nation_resize_is_at_war_with(world.nation_size());
+	world.nation_resize_has_military_access_from(world.nation_size());
+	world.nation_resize_is_on_same_side_in_war_with(world.nation_size());
+	world.nation_resize_is_in_common_war_with(world.nation_size());
+
+	world.army_resize_unit_build_commodity_float_buffer_1(world.unit_build_commodity_size());
+	world.army_resize_unit_build_commodity_float_buffer_2(world.unit_build_commodity_size());
+	world.army_resize_unit_supply_commodity_float_buffer_1(world.unit_supply_commodity_size());
+	world.army_resize_unit_supply_commodity_float_buffer_2(world.unit_supply_commodity_size());
+
+	world.navy_resize_unit_build_commodity_float_buffer_1(world.unit_build_commodity_size());
+	world.navy_resize_unit_build_commodity_float_buffer_2(world.unit_build_commodity_size());
+	world.navy_resize_unit_supply_commodity_float_buffer_1(world.unit_supply_commodity_size());
+	world.navy_resize_unit_supply_commodity_float_buffer_2(world.unit_supply_commodity_size());
+
 	province::restore_distances(*this);
 
 	world.for_each_nation([&](dcon::nation_id id) { politics::update_displayed_identity(*this, id); });
@@ -4649,6 +4775,8 @@ void state::fill_unsaved_data() { // reconstructs derived values that are not di
 		world.issue_set_issue_type(i, uint8_t(culture::issue_type::political));
 	}
 
+
+
 	military::reset_unit_stats(*this);
 	culture::clear_existing_tech_effects(*this);
 	culture::repopulate_technology_effects(*this);
@@ -4683,11 +4811,17 @@ void state::fill_unsaved_data() { // reconstructs derived values that are not di
 	military::regenerate_ship_scores(*this);
 	nations::update_industrial_scores(*this);
 	nations::update_military_scores(*this);
-	nations::update_rankings(*this);
+	if(!lua_nation_ranking_function_is_missing) {
+		nations::update_rankings_lua(*this);
+	}
+	if(lua_nation_ranking_function_is_missing) {
+		nations::update_rankings(*this);
+	}
 	nations::update_ui_rankings(*this);
 
 	nations::monthly_flashpoint_update(*this);
 
+	logistics::regenerate_unsaved_values(*this);
 
 	//
 	// clear any pending messages from previously loaded saves
@@ -5075,16 +5209,35 @@ void state::single_game_tick() {
 				break;
 			}
 		});
+		// unit movement update should happen before supply routes update at minimum so routes can be immediately updated upon movement completion
+		military::update_movement(*this);
 
-		economy::daily_update(*this, false, 1.f);
+		economy::daily_update(*this, false, 1.f, 0);
 
 		//
 		// ALTERNATE PAR DEMO START POINT B
 		//
 
-		military::recover_org(*this);
+
+		logistics::update_supply_routes_daily(*this);
+
+		economy::advance_constructions_progress(*this);
+
+		economy::resolve_constructions(*this);
+
+		// Ship repair happens daily now, and can be done in parallel with org calculations
+		concurrency::parallel_invoke(
+			[&]() {
+				military::recover_land_org(*this);
+			},
+			[&]() {
+				military::recover_naval_org(*this);
+			},
+			[&]() {
+				military::repair_ships(*this);
+			}
+		);
 		military::update_siege_progress(*this);
-		military::update_movement(*this);
 		military::update_naval_battles(*this);
 		military::update_land_battles(*this);
 
@@ -5097,7 +5250,13 @@ void state::single_game_tick() {
 
 		nations::update_industrial_scores(*this);
 		nations::update_military_scores(*this); // depends on ship score, land unit average
-		nations::update_rankings(*this);				// depends on industrial score, military scores
+		if(!lua_nation_ranking_function_is_missing) {
+			nations::update_rankings_lua(*this);
+		}
+		if(lua_nation_ranking_function_is_missing) {
+			nations::update_rankings(*this);
+		}
+		//nations::update_rankings(*this);				// depends on industrial score, military scores
 		nations::update_great_powers(*this);		// depends on rankings
 		nations::update_influence(*this);				// depends on rankings, great powers
 
@@ -5118,6 +5277,14 @@ void state::single_game_tick() {
 
 		event::update_events(*this);
 
+		// weekly updates
+		auto day_of_week = current_date.to_raw_value() % 7;
+		switch(day_of_week) {
+		case 6:
+			sys::update_modifier_effects(*this);
+			break;
+		}
+
 		// Once per month updates, spread out over the month
 		switch(ymd_date.day) {
 		case 1:
@@ -5126,7 +5293,6 @@ void state::single_game_tick() {
 			break;
 		case 2:
 			province::update_blockaded_cache(*this);
-			sys::update_modifier_effects(*this);
 			break;
 		case 3:
 			military::monthly_leaders_update(*this);
@@ -5155,10 +5321,11 @@ void state::single_game_tick() {
 			military::apply_attrition(*this);
 			break;
 		case 9:
-			military::repair_ships(*this);
+			military::update_fastest_units(*this);
 			break;
 		case 10:
 			province::update_crimes(*this);
+			economy::recreate_total_government_stockpiles(*this);
 			break;
 		case 11:
 			province::update_nationalism(*this);
@@ -5188,6 +5355,7 @@ void state::single_game_tick() {
 			break;
 		case 19:
 			ai::update_budget(*this);
+			ai::update_stockpile_targets(*this);
 			break;
 		case 20:
 			nations::update_flashpoint_tags(*this);
@@ -5258,8 +5426,8 @@ void state::single_game_tick() {
 				}
 
 				ai::update_influence_priorities(*this);
-				nations::generate_sea_trade_routes(*this);
-				nations::recalculate_markets_distance(*this);
+				trade_network::generate_sea_trade_routes(*this);
+				trade_network::recalculate_markets_distance(*this);
 			}
 			if(ymd_date.month == 2) {
 				ai::upgrade_colonies(*this);
@@ -5287,7 +5455,7 @@ void state::single_game_tick() {
 			}
 			if(ymd_date.month == 7) {
 				ai::update_influence_priorities(*this);
-				nations::recalculate_markets_distance(*this);
+				trade_network::recalculate_markets_distance(*this);
 			}
 			if(ymd_date.month == 9 && !national_definitions.on_quarterly_pulse.empty()) {
 				for(auto n : world.in_nation) {
@@ -5373,19 +5541,8 @@ void state::single_game_tick() {
 		}
 	}
 
-	if((current_date.value % 16) == 0) {
-		auto index = economy::most_recent_price_record_index(*this);
-		for(auto c : world.in_commodity) {
-			c.set_price_record(index, economy::median_price(*this, c));
-		}
-	}
 
-	if(((ymd_date.month % 3) == 0) && (ymd_date.day == 1)) {
-		auto index = economy::most_recent_gdp_record_index(*this);
-		for(auto n : world.in_nation) {
-			n.set_gdp_record(index, economy::gdp::value_nation_adjusted(*this, n));
-		}
-	}
+	
 
 	ui_date = current_date;
 
@@ -5536,6 +5693,8 @@ std::thread state::start_logger_thread() {
 			this->flush_pending_log_messages();
 			std::this_thread::sleep_for(std::chrono::milliseconds(50));
 		}
+		// Do one last flush to flush any remaining messages before exit
+		this->flush_pending_log_messages();
 	});
 	return thread;
 }
@@ -6713,8 +6872,7 @@ void sys::state::set_selected_province(dcon::province_id prov_id) {
 	if(prov_id && map_state.selected_province != prov_id) {
 		map_state.unhandled_province_selection = true;
 		map_state.selected_province = prov_id;
-		selected_navies.clear();
-		selected_armies.clear();
+		game_scene::deselect_units(*this);
 		selected_regiments_clear(*this);
 		selected_ships_clear(*this);
 		game_state_updated.store(true, std::memory_order_release);

@@ -25,11 +25,11 @@ public:
 	void on_update(sys::state& state) noexcept override {
 		auto com = retrieve<dcon::commodity_id>(state, parent);
 		if(state.world.nation_get_drawing_on_stockpiles(state.local_player_nation, com)) {
-			if(state.world.nation_get_stockpiles(state.local_player_nation, com) > 0)
+			if(state.world.nation_get_total_stockpiles(state.local_player_nation, com) > 0)
 				frame = 2;
 			else
 				frame = 0;
-		} else if(state.world.nation_get_stockpiles(state.local_player_nation, com) < state.world.nation_get_stockpile_targets(state.local_player_nation, com)) {
+		} else if(state.world.nation_get_total_stockpiles(state.local_player_nation, com) < state.world.nation_get_stockpile_targets(state.local_player_nation, com)) {
 			frame = 1;
 		} else {
 			frame = 0;
@@ -40,7 +40,7 @@ public:
 		auto com = retrieve<dcon::commodity_id>(state, parent);
 		if(state.world.nation_get_drawing_on_stockpiles(state.local_player_nation, com)) {
 			return tooltip_behavior::variable_tooltip;
-		} else if(state.world.nation_get_stockpiles(state.local_player_nation, com) < state.world.nation_get_stockpile_targets(state.local_player_nation, com)) {
+		} else if(state.world.nation_get_total_stockpiles(state.local_player_nation, com) < state.world.nation_get_stockpile_targets(state.local_player_nation, com)) {
 			return tooltip_behavior::variable_tooltip;
 		} else {
 			return tooltip_behavior::no_tooltip;
@@ -51,9 +51,9 @@ public:
 	void update_tooltip(sys::state& state, int32_t x, int32_t y, text::columnar_layout& contents) noexcept override {
 		auto com = retrieve<dcon::commodity_id>(state, parent);
 		if(state.world.nation_get_drawing_on_stockpiles(state.local_player_nation, com)) {
-			if(state.world.nation_get_stockpiles(state.local_player_nation, com) > 0)
+			if(state.world.nation_get_total_stockpiles(state.local_player_nation, com) > 0)
 				text::add_line(state, contents, "trade_setting_drawing");
-		} else if(state.world.nation_get_stockpiles(state.local_player_nation, com) < state.world.nation_get_stockpile_targets(state.local_player_nation, com)) {
+		} else if(state.world.nation_get_total_stockpiles(state.local_player_nation, com) < state.world.nation_get_stockpile_targets(state.local_player_nation, com)) {
 			text::add_line(state, contents, "trade_setting_filling");
 		} else {
 
@@ -558,8 +558,8 @@ std::string name_view_commodity_id(sys::state& state, element_base* container, d
 };
 
 bool compare_price(sys::state& state, element_base* container, const dcon::commodity_id a, const  dcon::commodity_id b) {
-	auto av = economy::median_price(state, a);
-	auto bv = economy::median_price(state, b);
+	auto av = state.world.commodity_get_median_price(a);
+	auto bv = state.world.commodity_get_median_price(b);
 	if(av != bv)
 		return av > bv;
 	else
@@ -567,7 +567,7 @@ bool compare_price(sys::state& state, element_base* container, const dcon::commo
 }
 
 std::string price_view_commodity_id(sys::state& state, element_base* container, dcon::commodity_id item) {
-	return text::format_money(economy::median_price(state, item));
+	return text::format_money(state.world.commodity_get_median_price(item));
 };
 std::string supply_view_commodity_id(sys::state& state, element_base* container, dcon::commodity_id item) {
 	return text::format_float(economy::supply(state, item));
@@ -585,7 +585,7 @@ std::string stockpile_market_view_commodity_id(sys::state& state, element_base* 
 	return text::format_float(economy::market_pool(state, item));
 };
 std::string stockpile_player_view_commodity_id(sys::state& state, element_base* container, dcon::commodity_id item) {
-	return text::format_float(state.world.nation_get_stockpiles(state.local_player_nation, item));
+	return text::format_float(state.world.nation_get_total_stockpiles(state.local_player_nation, item));
 };
 std::string stockpile_target_player_view_commodity_id(sys::state& state, element_base* container, dcon::commodity_id item) {
 	return text::format_float(state.world.nation_get_stockpile_targets(state.local_player_nation, item));
@@ -645,8 +645,8 @@ bool compare_stockpile_market(sys::state& state, element_base* container, dcon::
 		return a.index() < b.index();
 }
 bool compare_stockpile_player(sys::state& state, element_base* container, dcon::commodity_id a, dcon::commodity_id b) {
-	auto value_a = state.world.nation_get_stockpiles(state.local_player_nation, a);
-	auto value_b = state.world.nation_get_stockpiles(state.local_player_nation, b);
+	auto value_a = state.world.nation_get_total_stockpiles(state.local_player_nation, a);
+	auto value_b = state.world.nation_get_total_stockpiles(state.local_player_nation, b);
 	if(value_a != value_b)
 		return value_a > value_b;
 	else
@@ -727,15 +727,15 @@ static table::column<dcon::commodity_id> trade_good_player_price = {
 	.sortable = true,
 	.header = "price_nation",
 	.compare = [](sys::state& state, element_base* container, dcon::commodity_id a, dcon::commodity_id b) {
-		auto av = economy::price(state, state.local_player_nation, a);
-		auto bv = economy::price(state, state.local_player_nation, b);
+		auto av = economy::price_slow(state, state.local_player_nation, a);
+		auto bv = economy::price_slow(state, state.local_player_nation, b);
 		if(av != bv)
 			return av > bv;
 		else
 			return a.index() < b.index();
 	},
 	.view = [](sys::state& state, element_base* container, dcon::commodity_id id) {
-		auto value = economy::price(state, state.local_player_nation, id);
+		auto value = economy::price_slow(state, state.local_player_nation, id);
 		return text::format_money(value);
 	}
 };
@@ -955,8 +955,8 @@ static table::column<dcon::nation_id> nation_price = {
 	.header = "price_nation",
 	.compare = [](sys::state& state, element_base* container, dcon::nation_id a, dcon::nation_id b) {
 		dcon::commodity_id good = retrieve<dcon::commodity_id>(state, container);
-		auto av = economy::price(state, a, good);
-		auto bv = economy::price(state, b, good);
+		auto av = economy::price_slow(state, a, good);
+		auto bv = economy::price_slow(state, b, good);
 		if(av != bv)
 			return av > bv;
 		else
@@ -964,7 +964,7 @@ static table::column<dcon::nation_id> nation_price = {
 	},
 	.view = [](sys::state& state, element_base* container, dcon::nation_id id) {
 		dcon::commodity_id good = retrieve<dcon::commodity_id>(state, container);
-		auto value = economy::price(state, id, good);
+		auto value = economy::price_slow(state, id, good);
 		return text::format_float(value, 1);
 	}
 };
@@ -1159,8 +1159,8 @@ static table::column<dcon::market_id> market_price = {
 	.header = "price_market",
 	.compare = [](sys::state& state, element_base* container, dcon::market_id a, dcon::market_id b) {
 		dcon::commodity_id good = retrieve<dcon::commodity_id>(state, container);
-		auto av = economy::price(state, a, good);
-		auto bv = economy::price(state, b, good);
+		auto av = economy::price_slow(state, a, good);
+		auto bv = economy::price_slow(state, b, good);
 		if(av != bv)
 			return av > bv;
 		else
@@ -1168,7 +1168,7 @@ static table::column<dcon::market_id> market_price = {
 	},
 	.view = [](sys::state& state, element_base* container, dcon::market_id id) {
 		dcon::commodity_id good = retrieve<dcon::commodity_id>(state, container);
-		auto value = economy::price(state, id, good);
+		auto value = economy::price_slow(state, id, good);
 		return text::format_float(value, 1);
 	}
 };
@@ -1246,7 +1246,7 @@ public:
 		assert(economy::price_history_length >= 32);
 
 		std::vector<float> datapoints(32);
-		auto newest_index = economy::most_recent_price_record_index(state);
+		auto newest_index = economy::most_recent_price_record_index(state, 0);
 		for(uint32_t i = 0; i < 32; ++i) {
 			datapoints[i] = state.world.commodity_get_price_record(com, (newest_index + i + economy::price_history_length - 32) % economy::price_history_length);
 		}
@@ -1263,7 +1263,7 @@ public:
 	void on_update(sys::state& state) noexcept override {
 		auto com = retrieve<dcon::commodity_id>(state, parent);
 
-		auto newest_index = economy::most_recent_price_record_index(state);
+		auto newest_index = economy::most_recent_price_record_index(state, 0);
 		float max_price = state.world.commodity_get_price_record(com, newest_index);
 
 		for(int32_t i = 1; i < 32; ++i) {
@@ -1278,7 +1278,7 @@ public:
 	void on_update(sys::state& state) noexcept override {
 		auto com = retrieve<dcon::commodity_id>(state, parent);
 
-		auto newest_index = economy::most_recent_price_record_index(state);
+		auto newest_index = economy::most_recent_price_record_index(state, 0);
 		float min_price = state.world.commodity_get_price_record(com, newest_index);
 
 		for(int32_t i = 1; i < 32; ++i) {
@@ -1336,7 +1336,7 @@ public:
 	}
 	void on_update(sys::state& state) noexcept override {
 		auto com = retrieve<dcon::commodity_id>(state, parent);
-		set_text(state, text::produce_simple_string(state, "trade_stockpile_current") + text::format_float(state.world.nation_get_stockpiles(state.local_player_nation, com), 1));
+		set_text(state, text::produce_simple_string(state, "trade_stockpile_current") +text::prettify(  int64_t(state.world.nation_get_total_stockpiles(state.local_player_nation, com)) ));
 	}
 };
 
@@ -1345,7 +1345,7 @@ public:
 	void on_update(sys::state& state) noexcept override {
 		auto com = retrieve<dcon::commodity_id>(state, parent);
 		text::substitution_map m;
-		text::add_to_substitution_map(m, text::variable_type::val, text::pretty_integer{ int64_t(economy::supply(state, state.local_player_nation, com)) });
+		text::add_to_substitution_map(m, text::variable_type::val, text::pretty_integer{ int64_t(economy::production(state, state.local_player_nation, com)) });
 		set_text(state, text::resolve_string_substitution(state, "produced_detail_remove", m));
 	}
 };
@@ -1399,9 +1399,10 @@ public:
 class trade_slider_amount : public simple_text_element_base {
 public:
 	void on_update(sys::state& state) noexcept override {
-		auto com = retrieve<dcon::commodity_id>(state, parent);
 		auto val = retrieve<get_stockpile_target>(state, parent);
-		set_text(state, text::prettify(int64_t(val.value)));
+		text::substitution_map m;
+		text::add_to_substitution_map(m, text::variable_type::val, text::pretty_integer{ int64_t(val.value) });
+		set_text(state, text::resolve_string_substitution(state, "government_stockpiles_target", m));
 	}
 };
 
@@ -1409,7 +1410,7 @@ class commodity_price_text : public simple_text_element_base {
 public:
 	void on_update(sys::state& state) noexcept override {
 		auto commodity_id = retrieve<dcon::commodity_id>(state, parent);
-		set_text(state, text::format_money(economy::median_price(state, commodity_id)));
+		set_text(state, text::format_money(state.world.commodity_get_median_price(commodity_id)));
 	}
 };
 
@@ -1453,6 +1454,8 @@ public:
 			slider_value_display = ptr.get();
 			return ptr;
 		} else if(name == "confirm_trade") {
+			return make_element_by_type<invisible_element>(state, id);
+		} else if(name == "goods_stockpile_amount") {
 			return make_element_by_type<stockpile_amount_label>(state, id);
 		} else if(name == "goods_details") {
 			return make_element_by_type<trade_details_button>(state, id);

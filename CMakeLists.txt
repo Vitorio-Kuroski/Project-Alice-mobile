@@ -63,6 +63,7 @@ list(APPEND ALICE_CORE_SOURCES_LIST
 	"${PROJECT_SOURCE_DIR}/src/gui/province_factories.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/factory_details.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/gui.cpp"
+	"${PROJECT_SOURCE_DIR}/src/economy/terms.cpp"
 )
 set_source_files_properties(src/lunasvg/plutovg-blend.c PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 set_source_files_properties(src/lunasvg/plutovg-canvas.c PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
@@ -101,6 +102,7 @@ list(APPEND ALICE_INCREMENTAL_SOURCES_LIST_ECONOMY
 	"${PROJECT_SOURCE_DIR}/src/economy/construction.cpp"
 	"${PROJECT_SOURCE_DIR}/src/economy/advanced_province_buildings.cpp"
 	"${PROJECT_SOURCE_DIR}/src/economy/national_budget.cpp"
+	"${PROJECT_SOURCE_DIR}/src/economy/trade_network.cpp"
 )
 set_source_files_properties(
 	${ALICE_INCREMENTAL_SOURCES_LIST_ECONOMY}
@@ -128,6 +130,11 @@ set_source_files_properties(
 )
 
 list(APPEND ALICE_INCREMENTAL_SOURCES_LIST_GUI_OTHER
+	"${PROJECT_SOURCE_DIR}/src/gui/gui_element_types.cpp"
+	"${PROJECT_SOURCE_DIR}/src/gui/gui_main_menu.cpp"
+	"${PROJECT_SOURCE_DIR}/src/gui/gui_console.cpp"
+	"${PROJECT_SOURCE_DIR}/src/gui/gui_event.cpp"
+	"${PROJECT_SOURCE_DIR}/src/gui/gui_message_settings_window.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/gui_message_window.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/gui_chat_window.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/gui_combat.cpp"
@@ -149,6 +156,28 @@ list(APPEND ALICE_INCREMENTAL_SOURCES_LIST_GUI_OTHER
 	"${PROJECT_SOURCE_DIR}/src/gui/unit_tooltip.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/gui_context_window.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/labour_details.cpp"
+	"${PROJECT_SOURCE_DIR}/src/map/map_modes.cpp"
+	"${PROJECT_SOURCE_DIR}/src/military/military.cpp"
+	"${PROJECT_SOURCE_DIR}/src/logistics/logistics.cpp"
+	"${PROJECT_SOURCE_DIR}/src/common_types/debug_string_convertions.cpp"
+	"${PROJECT_SOURCE_DIR}/src/nations/nations.cpp"
+	"${PROJECT_SOURCE_DIR}/src/network/SHA512.cpp"
+	"${PROJECT_SOURCE_DIR}/src/network/network.cpp"
+	"${PROJECT_SOURCE_DIR}/src/parsing/float_from_chars.cpp"
+	"${PROJECT_SOURCE_DIR}/src/parsing/parsers.cpp"
+	"${PROJECT_SOURCE_DIR}/src/platform_specific.cpp"
+	"${PROJECT_SOURCE_DIR}/src/provinces/province.cpp"
+	"${PROJECT_SOURCE_DIR}/src/scripting/effects.cpp"
+	"${PROJECT_SOURCE_DIR}/src/scripting/events.cpp"
+	"${PROJECT_SOURCE_DIR}/src/scripting/triggers.cpp"
+	"${PROJECT_SOURCE_DIR}/src/scripting/fif_triggers.cpp"
+	"${PROJECT_SOURCE_DIR}/src/text/bmfont.cpp"
+	"${PROJECT_SOURCE_DIR}/src/text/fonts.cpp"
+	"${PROJECT_SOURCE_DIR}/src/text/text.cpp"
+	"${PROJECT_SOURCE_DIR}/src/zstd/zstd.cpp"
+	"${PROJECT_SOURCE_DIR}/src/network/pcp.cpp"
+	"${PROJECT_SOURCE_DIR}/src/gamestate/game_scene.cpp"
+	"${PROJECT_SOURCE_DIR}/src/gamerule/gamerule.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/gui_common_elements.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/gui_effect_tooltips.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/widgets/table.cpp"
@@ -157,6 +186,7 @@ list(APPEND ALICE_INCREMENTAL_SOURCES_LIST_GUI_OTHER
 	"${PROJECT_SOURCE_DIR}/src/gui/ui_state.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/gui_element_base.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/gui_other.cpp"
+
 )
 set_source_files_properties(
 	${ALICE_INCREMENTAL_SOURCES_LIST_GUI_OTHER}
@@ -186,13 +216,15 @@ list(APPEND ALICE_INCREMENTAL_SOURCES_LIST_SCRIPTING
 	"${PROJECT_SOURCE_DIR}/src/scripting/events.cpp"
 	"${PROJECT_SOURCE_DIR}/src/scripting/triggers.cpp"
 	"${PROJECT_SOURCE_DIR}/src/scripting/fif_triggers.cpp"
+	"${PROJECT_SOURCE_DIR}/src/gamestate/lua_alice_api.cpp"
 )
 set_source_files_properties(
 	${ALICE_INCREMENTAL_SOURCES_LIST_SCRIPTING}
 	PROPERTIES UNITY_GROUP "bucket-SCRIPTING"
 )
 
-list(APPEND ALICE_INCREMENTAL_SOURCES_LIST_GAMESTATE	
+list(APPEND ALICE_INCREMENTAL_SOURCES_LIST_GAMESTATE
+	"${PROJECT_SOURCE_DIR}/src/gamestate/system_state.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gamestate/commands.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gamestate/diplomatic_messages.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gamestate/modifiers.cpp"
@@ -348,7 +380,7 @@ if(WIN32)
 	set(CMAKE_CXX_FLAGS_RELEASE "")
 	if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 	# All common flags for all Clang Windows builds
-	set(CommonClangWinFlags /bigobj /wd4100 /wd4189 /wd4065 /wd4201 /wd4324 /GR- /W4 /permissive- /WX /GF /w34388 /w34389 -Wno-unused-macros -Wno-array-bounds-pointer-arithmetic -Wno-unused-lambda-capture -Wno-zero-length-array -Wno-switch-default -Wno-reserved-identifier -Wno-unused-parameter -Wno-unused-variable -Wno-unused-private-field /Z7 -Wno-invalid-offsetof -Wno-deprecated-volatile -Wno-missing-prototypes -Wno-implicit-int-float-conversion -Wno-unsafe-buffer-usage -Wno-float-equal -Wno-shadow-field-in-constructor -Wno-gnu-anonymous-struct -Wno-nested-anon-types -Wno-double-promotion -Wno-shadow-uncaptured-local -Wno-nonportable-system-include-path -Wno-format-nonliteral -Wno-shorten-64-to-32 -Wno-ctad-maybe-unsupported -Wno-implicit-int-conversion -Wno-disabled-macro-expansion -Wno-comma -Wno-cast-function-type-strict -Wno-cast-function-type -Wno-invalid-offsetof -Wno-microsoft-cast -Wno-unused-but-set-variable -Wno-padded -Wno-unique-object-duplication -Wno-nrvo -Wno-declaration-after-statement -Wno-undefined-func-template -Wno-bad-function-cast -Wno-unused-function -Wno-cast-qual -Wno-format-security -Wno-overriding-option -Wno-suggest-destructor-override -Wno-lifetime-safety-invalidation -Wno-lifetime-safety-cross-tu-suggestions -Wno-lifetime-safety-intra-tu-suggestions -Wno-unused-template -Wno-lifetime-safety-use-after-scope-moved -Wno-lifetime-safety-dangling-field-moved -Wno-lifetime-safety-return-stack-addr-moved)
+	set(CommonClangWinFlags /bigobj /wd4100 /wd4189 /wd4065 /wd4201 /wd4324 /GR- /W4 /permissive- /WX /GF /w34388 /w34389 -fstrict-aliasing -Wno-unused-macros -Wno-array-bounds-pointer-arithmetic -Wno-unused-lambda-capture -Wno-zero-length-array -Wno-switch-default -Wno-reserved-identifier -Wno-unused-parameter -Wno-unused-variable -Wno-unused-private-field /Z7 -Wno-invalid-offsetof -Wno-deprecated-volatile -Wno-missing-prototypes -Wno-implicit-int-float-conversion -Wno-unsafe-buffer-usage -Wno-float-equal -Wno-shadow-field-in-constructor -Wno-gnu-anonymous-struct -Wno-nested-anon-types -Wno-double-promotion -Wno-shadow-uncaptured-local -Wno-nonportable-system-include-path -Wno-format-nonliteral -Wno-shorten-64-to-32 -Wno-ctad-maybe-unsupported -Wno-implicit-int-conversion -Wno-disabled-macro-expansion -Wno-comma -Wno-cast-function-type-strict -Wno-cast-function-type -Wno-invalid-offsetof -Wno-microsoft-cast -Wno-unused-but-set-variable -Wno-padded -Wno-unique-object-duplication -Wno-nrvo -Wno-declaration-after-statement -Wno-undefined-func-template -Wno-bad-function-cast -Wno-unused-function -Wno-cast-qual -Wno-format-security -Wno-overriding-option -Wno-suggest-destructor-override -Wno-lifetime-safety-invalidation -Wno-lifetime-safety-cross-tu-suggestions -Wno-lifetime-safety-intra-tu-suggestions -Wno-unused-template -Wno-lifetime-safety-use-after-scope-moved -Wno-lifetime-safety-dangling-field-moved -Wno-lifetime-safety-return-stack-addr-moved)
 		if(OPTIMIZE_MODE STREQUAL "On")
 			message(STATUS "Optimizing with PGO data")
 			target_compile_options(AliceCommon INTERFACE
@@ -428,15 +460,19 @@ else() # GCC or CLANG
 	target_link_options(Alice INTERFACE -rdynamic -Wl,-E)
 	target_link_options(AliceIncremental INTERFACE -rdynamic -Wl,-E)
 	target_link_options(AliceCommon INTERFACE -rdynamic -Wl,-E)
+	# common flags for all linux builds
+	set(CommonLinuxFlags -Wall -Wextra -Wpedantic -fstrict-aliasing -Wno-unused-parameter -Wno-unused-variable -Wno-switch -Wdangling-else -Wno-unused-private-field -Wno-invalid-offsetof -Wno-unused-but-set-variable -Wno-microsoft-cast -Wno-declaration-after-statement)
 	# See for FMA support: https://stackoverflow.com/questions/21001388/fma3-in-gcc-how-to-enable
+	#Clang
 	if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 		target_compile_options(AliceCommon INTERFACE
-			-Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-unused-variable -Wno-switch -Wdangling-else -Wno-unused-private-field -Wno-invalid-offsetof -Wno-unused-but-set-variable -Wno-microsoft-cast -Wno-declaration-after-statement  #-Werror
+			${CommonLinuxFlags}
 			$<$<CONFIG:Debug>:			-g -pipe>
 			$<$<NOT:$<CONFIG:Debug>>: 	-O3 -pipe -fno-rtti -DNDEBUG>)
+	#GCC
 	else()
 		target_compile_options(AliceCommon INTERFACE
-										# -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-switch -Wno-unused-private-field -Wno-unused-but-set-variable -Wno-parentheses
+			${CommonLinuxFlags}
 			$<$<CONFIG:Debug>:			-g -pipe>
 			$<$<NOT:$<CONFIG:Debug>>: 	-O3 -pipe -fno-rtti -DNDEBUG>)
 	endif()
@@ -532,6 +568,7 @@ target_include_directories(AliceCommon INTERFACE
 	${PROJECT_SOURCE_DIR}/src/economy
 	${PROJECT_SOURCE_DIR}/src/culture
 	${PROJECT_SOURCE_DIR}/src/military
+	${PROJECT_SOURCE_DIR}/src/logistics
 	${PROJECT_SOURCE_DIR}/src/scripting
 	${PROJECT_SOURCE_DIR}/src/scripting/luajit
 	${PROJECT_SOURCE_DIR}/src/zstd
