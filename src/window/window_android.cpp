@@ -37,6 +37,9 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl32.h>
+#include <jni.h>
+#include <swappy/swappyGL.h>
+#include <swappy/swappyGL_extra.h>
 #include <dirent.h>
 #include <sched.h>
 #include <sys/resource.h>
@@ -353,6 +356,51 @@ bool create_egl_context(window_data_impl& win) {
 	return true;
 }
 
+// ---------------------------------------------------------------------------
+// ritmo de quadros (Swappy, do Android Game Development Kit)
+// ---------------------------------------------------------------------------
+//
+// Com so o eglSwapInterval, um quadro que atrasa um pouco faz o seguinte sair
+// colado, e o driver pode enfileirar quadros (mais atraso entre o toque e a
+// tela). O Swappy entrega cada quadro alinhado ao vsync no intervalo pedido
+// (60 ou 30 FPS) e evita a fila. Se ele nao iniciar, ou for desligado nos
+// Ajustes do Android, volta ao eglSwapBuffers com eglSwapInterval.
+
+bool swappy_initialized = false;
+bool swappy_ready = false;  // SwappyGL_init deu certo neste aparelho
+bool swappy_active = false; // em uso agora (pronto e ligado nos ajustes)
+std::atomic<bool> swappy_wanted{ true };
+std::atomic<bool> swappy_setting_changed{ false };
+
+void init_swappy(window_data_impl& win) {
+	swappy_initialized = true;
+	// o Swappy usa JNI desta thread: ela fica presa a JVM (o call_activity do
+	// entry_point_android.cpp entao reaproveita o JNIEnv em vez de prender e soltar)
+	JNIEnv* env = nullptr;
+	if(win.app->activity->vm->AttachCurrentThread(&env, nullptr) != JNI_OK || !env) {
+		ALICE_LOGE("ritmo de quadros: AttachCurrentThread falhou; usando eglSwapInterval");
+		return;
+	}
+	swappy_ready = SwappyGL_init(env, win.app->activity->clazz) && SwappyGL_isEnabled();
+	ALICE_LOGI("ritmo de quadros (Swappy): %s", swappy_ready ? "ativo" : "indisponivel neste aparelho; usando eglSwapInterval");
+}
+
+// Chamada com a superficie atual (contexto EGL corrente): ao criar a
+// superficie, ao mudar o limite de FPS e ao ligar/desligar o Swappy.
+void update_frame_pacing(window_data_impl& win) {
+	if(!swappy_initialized)
+		init_swappy(win);
+	swappy_active = swappy_ready && swappy_wanted.load();
+	if(swappy_active) {
+		eglSwapInterval(win.egl_display, 1); // o Swappy decide quando cada quadro sai
+		SwappyGL_setWindow(win.native_window);
+		SwappyGL_setAutoSwapInterval(false); // respeita o limite escolhido (60 ou 30)
+		SwappyGL_setSwapIntervalNS(g_swap_interval == 2 ? SWAPPY_SWAP_30FPS : SWAPPY_SWAP_60FPS);
+	} else {
+		eglSwapInterval(win.egl_display, g_swap_interval); // vsync (1, como o glfwSwapInterval(1) do desktop) ou 30 FPS
+	}
+}
+
 bool create_egl_surface(window_data_impl& win, ANativeWindow* native_window) {
 	win.native_window = native_window;
 	apply_render_scale(win);
@@ -365,7 +413,7 @@ bool create_egl_surface(window_data_impl& win, ANativeWindow* native_window) {
 		ALICE_LOGE("eglMakeCurrent falhou (0x%x)", eglGetError());
 		return false;
 	}
-	eglSwapInterval(win.egl_display, g_swap_interval); // vsync (1, como o glfwSwapInterval(1) do desktop) ou 30 FPS
+	update_frame_pacing(win);
 	return true;
 }
 
@@ -380,6 +428,10 @@ void destroy_egl_surface(window_data_impl& win) {
 }
 
 void terminate_egl(window_data_impl& win) {
+	if(swappy_ready) {
+		SwappyGL_destroy();
+		swappy_ready = swappy_active = false;
+	}
 	destroy_egl_surface(win);
 	if(win.egl_display != EGL_NO_DISPLAY) {
 		if(win.egl_context != EGL_NO_CONTEXT)
@@ -781,11 +833,15 @@ void apply_pending_settings(sys::state& state) {
 	if(int32_t const fps = pending_fps_limit.exchange(0); fps > 0) {
 		g_swap_interval = fps <= 30 ? 2 : 1;
 		if(win.egl_surface != EGL_NO_SURFACE)
-			eglSwapInterval(win.egl_display, g_swap_interval);
+			update_frame_pacing(win);
 		ALICE_LOGI("limite de quadros: %d FPS (swap interval %d)", int(fps), int(g_swap_interval));
 	}
 	if(int32_t const perf_on = pending_perf_counter.exchange(-1); perf_on >= 0)
 		set_perf_counter(perf_on != 0);
+	if(swappy_setting_changed.exchange(false) && win.egl_surface != EGL_NO_SURFACE) {
+		update_frame_pacing(win);
+		ALICE_LOGI("ritmo de quadros: %s", swappy_active ? "Swappy" : "eglSwapInterval");
+	}
 	if(int32_t const percent = pending_map_scale.exchange(0); percent > 0) {
 		// o mapa e desenhado nessa fracao da resolucao da tela e ampliado; a
 		// interface fica na resolucao cheia (map::android_map_scale)
@@ -1287,9 +1343,11 @@ void render_frame(sys::state& state) {
 	GLenum const discard[] = { GL_DEPTH, GL_STENCIL };
 	glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, discard);
 
-	if(!eglSwapBuffers(win.egl_display, win.egl_surface)) {
+	bool const swapped = swappy_active ? SwappyGL_swap(win.egl_display, win.egl_surface)
+		: eglSwapBuffers(win.egl_display, win.egl_surface);
+	if(!swapped) {
 		EGLint const err = eglGetError();
-		ALICE_LOGE("eglSwapBuffers falhou (0x%x)", err);
+		ALICE_LOGE("troca de quadro falhou (0x%x)", err);
 		if(err == EGL_BAD_SURFACE || err == EGL_BAD_NATIVE_WINDOW) {
 			// a janela sumiu entre o poll e o swap -- recria na mesma janela se ainda existir
 			ANativeWindow* native_window = win.native_window;
@@ -1364,6 +1422,10 @@ void android_set_setting(char const* key, int32_t value) {
 		pending_map_scale.store(value);
 	else if(k == "idle_saver")
 		idle_saver_enabled.store(value != 0);
+	else if(k == "frame_pacing") {
+		swappy_wanted.store(value != 0);
+		swappy_setting_changed.store(true);
+	}
 	else
 		ALICE_LOGE("ajuste desconhecido: %s", key ? key : "(nulo)");
 }

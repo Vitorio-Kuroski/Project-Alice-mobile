@@ -79,6 +79,7 @@ public class AliceActivity extends NativeActivity {
 		nativeSetSetting("map_scale", mapScale());
 		nativeSetSetting("fps_limit", fpsLimit());
 		nativeSetSetting("idle_saver", idleSaverOn() ? 1 : 0);
+		nativeSetSetting("frame_pacing", framePacingOn() ? 1 : 0);
 	}
 
 	// --- menu "Ajustes do Android" (toque com tres dedos) ----------------------
@@ -126,6 +127,11 @@ public class AliceActivity extends NativeActivity {
 		return prefs.getBoolean("idle_saver", true);
 	}
 
+	// ritmo de quadros pelo Swappy (C++: update_frame_pacing); desligado, eglSwapInterval
+	private boolean framePacingOn() {
+		return prefs.getBoolean("frame_pacing", true);
+	}
+
 	private boolean hapticOn() {
 		return prefs.getBoolean("haptic", true);
 	}
@@ -154,6 +160,7 @@ public class AliceActivity extends NativeActivity {
 			"Resolução do mapa: " + mapScale() + "%",
 			"Limite de quadros: " + fpsLimit() + " FPS",
 			"Desenhar menos com o jogo pausado: " + (idleSaverOn() ? "sim" : "não"),
+			"Ritmo de quadros regular: " + (framePacingOn() ? "ligado" : "desligado"),
 			"Vibrar no toque longo: " + (hapticOn() ? "sim" : "não"),
 			"Mods: " + (chosenMods().isEmpty() ? "nenhum (jogo base)" : chosenMods().size() + " escolhido(s)")
 		};
@@ -184,9 +191,13 @@ public class AliceActivity extends NativeActivity {
 					nativeSetSetting("idle_saver", idleSaverOn() ? 1 : 0);
 					break;
 				case 6:
-					prefs.edit().putBoolean("haptic", !hapticOn()).apply();
+					prefs.edit().putBoolean("frame_pacing", !framePacingOn()).apply();
+					nativeSetSetting("frame_pacing", framePacingOn() ? 1 : 0);
 					break;
 				case 7:
+					prefs.edit().putBoolean("haptic", !hapticOn()).apply();
+					break;
+				case 8:
 					showModsDialog();
 					return;
 				}
