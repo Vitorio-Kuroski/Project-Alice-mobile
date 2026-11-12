@@ -187,7 +187,6 @@ Outras decisões que valem saber:
 
 - **Testado em um único aparelho** até agora (Moto One Hyper, Adreno 612). Outras GPUs (Mali, PowerVR) ainda não foram testadas.
 - **Mods:** só o jogo base; falta uma tela de seleção de mods.
-- **Digitar texto** (nome de save, chat) não funciona: a API nativa não entrega os caracteres do teclado virtual. Isso precisa de uma ponte JNI.
 - **Retomar depois de o Android fechar o app:** o save de segundo plano é feito, mas é preciso carregá-lo manualmente pelo menu.
 - **Valores de toque** (tempo do segurar, tolerância de movimento, velocidade do zoom da pinça) são palpites a ajustar com testes.
 - **Só arm64-v8a.**

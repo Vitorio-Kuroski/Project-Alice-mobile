@@ -31,6 +31,8 @@ Versão de testes do **Project Alice para Android**: o motor de código aberto p
 | Toque com três dedos | Abre os **Ajustes do Android**: contador de desempenho, resolução do desenho, limite de FPS, vibração |
 | Voltar | ESC (menu) |
 
+Para digitar (nome de save, chat), toque no campo de texto do jogo: abre o teclado do Android.
+
 Mouse e teclado físicos também funcionam.
 
 ## Novidades desta versão
@@ -42,7 +44,6 @@ Mouse e teclado físicos também funcionam.
 ## Limitações conhecidas
 
 - Sem seleção de mods; só o jogo base.
-- Não é possível digitar texto (nome de save, chat).
 - Entrar na partida leva alguns segundos num celular intermediário.
 
 ## Problemas?

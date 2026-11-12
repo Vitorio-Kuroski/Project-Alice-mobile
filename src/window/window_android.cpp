@@ -46,6 +46,8 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <mutex>
+#include <optional>
 
 #define ALICE_LOGI(...) __android_log_print(ANDROID_LOG_INFO, "Alice", __VA_ARGS__)
 #define ALICE_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "Alice", __VA_ARGS__)
@@ -749,6 +751,110 @@ void apply_pending_settings(sys::state& state) {
 		set_perf_counter(perf_on != 0);
 }
 
+// ---------------------------------------------------------------------------
+// digitar texto
+// ---------------------------------------------------------------------------
+//
+// A NativeActivity nao entrega os caracteres do teclado virtual. Quando um
+// campo de texto do jogo ganha foco (ou recebe um toque com o foco ja nele), a
+// AliceActivity abre uma janela com o texto atual e o teclado; o texto
+// confirmado substitui o do campo, pelo mesmo on_text do teclado no PC.
+
+std::mutex text_result_mutex;
+std::optional<std::string> text_result; // texto confirmado, ainda nao aplicado
+bool text_result_cancelled = false;
+bool text_dialog_open = false;
+ui::element_base* text_target = nullptr;     // campo para onde vai o texto
+ui::element_base* last_edit_target = nullptr; // para notar o foco mudando
+
+std::string utf16_to_utf8(std::u16string_view in) {
+	std::string out;
+	for(size_t i = 0; i < in.size(); ++i) {
+		uint32_t c = in[i];
+		if(c >= 0xD800 && c < 0xDC00 && i + 1 < in.size() && in[i + 1] >= 0xDC00 && in[i + 1] < 0xE000) {
+			c = 0x10000 + ((c - 0xD800) << 10) + (uint32_t(in[i + 1]) - 0xDC00);
+			++i;
+		}
+		if(c < 0x80) {
+			out += char(c);
+		} else if(c < 0x800) {
+			out += char(0xC0 | (c >> 6));
+			out += char(0x80 | (c & 0x3F));
+		} else if(c < 0x10000) {
+			out += char(0xE0 | (c >> 12));
+			out += char(0x80 | ((c >> 6) & 0x3F));
+			out += char(0x80 | (c & 0x3F));
+		} else {
+			out += char(0xF0 | (c >> 18));
+			out += char(0x80 | ((c >> 12) & 0x3F));
+			out += char(0x80 | ((c >> 6) & 0x3F));
+			out += char(0x80 | (c & 0x3F));
+		}
+	}
+	return out;
+}
+
+std::u32string utf8_to_utf32(std::string_view in) {
+	std::u32string out;
+	for(size_t i = 0; i < in.size();) {
+		uint8_t const b = uint8_t(in[i]);
+		int32_t extra = b < 0x80 ? 0 : (b >> 5) == 0x6 ? 1 : (b >> 4) == 0xE ? 2 : (b >> 3) == 0x1E ? 3 : -1;
+		if(extra < 0 || i + size_t(extra) >= in.size() + (extra == 0 ? 1 : 0)) {
+			++i; // byte invalido: pula
+			continue;
+		}
+		uint32_t c = extra == 0 ? b : extra == 1 ? (b & 0x1F) : extra == 2 ? (b & 0x0F) : (b & 0x07);
+		for(int32_t k = 1; k <= extra; ++k)
+			c = (c << 6) | (uint8_t(in[i + k]) & 0x3F);
+		out += char32_t(c);
+		i += size_t(extra) + 1;
+	}
+	return out;
+}
+
+void request_text_input(sys::state& state) {
+	auto* target = state.ui_state.edit_target_internal;
+	if(!target || text_dialog_open)
+		return;
+	text_dialog_open = true;
+	text_target = target;
+	android_request_text(utf16_to_utf8(target->text_content()).c_str());
+}
+
+// No loop da thread de desenho: abre a janela quando o foco chega a um campo
+// e aplica o texto confirmado.
+void update_text_input(sys::state& state) {
+	if(!state.win_ptr->game_started)
+		return;
+	auto* const target = state.ui_state.edit_target_internal;
+	if(target != last_edit_target) {
+		last_edit_target = target;
+		if(target)
+			request_text_input(state);
+	}
+
+	std::optional<std::string> entered;
+	{
+		std::lock_guard lock(text_result_mutex);
+		if(!text_result && !text_result_cancelled)
+			return;
+		entered.swap(text_result);
+		text_result_cancelled = false;
+	}
+	text_dialog_open = false;
+	// so se o campo ainda e o mesmo e continua com o foco
+	if(!entered || text_target != state.ui_state.edit_target_internal || !text_target)
+		return;
+	auto const text = utf8_to_utf32(*entered);
+	dispatch_to_game(state, [&] {
+		state.pass_edit_command(ui::edit_command::select_all, sys::key_modifiers::modifiers_none);
+		if(text.empty())
+			state.pass_edit_command(ui::edit_command::delete_selection, sys::key_modifiers::modifiers_none);
+		for(char32_t c : text)
+			state.on_text(c);
+	});
+}
+
 int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 	int32_t const action = AMotionEvent_getAction(event);
 	int32_t const masked = action & AMOTION_EVENT_ACTION_MASK;
@@ -847,9 +953,14 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 		if(touch.current == touch_tracker::mode::pending) {
 			// toque rapido = clique esquerdo onde o dedo encostou
 			auto const x = int32_t(touch.start_x), y = int32_t(touch.start_y);
+			auto* const focused_before = state.ui_state.edit_target_internal;
 			game_lbutton(state, x, y, true, mod);
 			game_lbutton(state, x, y, false, mod);
 			start_flash(touch_tracker::flash::tap);
+			// tocar de novo no campo que ja tinha o foco abre o teclado de novo
+			if(focused_before && focused_before == state.ui_state.edit_target_internal
+				&& state.ui_state.under_mouse == focused_before)
+				request_text_input(state);
 			touch.current = touch_tracker::mode::none;
 		} else if(touch.current == touch_tracker::mode::held) {
 			// segurou e soltou sem arrastar no mapa = clique direito onde encostou
@@ -1131,6 +1242,14 @@ float android_default_ui_scale(int32_t width, int32_t height, int32_t density_dp
 	return chosen;
 }
 
+void android_text_result(char const* text) {
+	std::lock_guard lock(text_result_mutex);
+	if(text)
+		text_result = std::string(text);
+	else
+		text_result_cancelled = true;
+}
+
 void android_set_setting(char const* key, int32_t value) {
 	std::string_view const k = key ? key : "";
 	if(k == "render_scale")
@@ -1226,6 +1345,7 @@ void run_android_main_loop(sys::state& game_state, android_app* app) {
 
 		if(can_render(win)) {
 			update_cpu_affinity(win);
+			update_text_input(game_state);
 			update_touch(game_state);
 			render_frame(game_state);
 			update_perf_counter(game_state);

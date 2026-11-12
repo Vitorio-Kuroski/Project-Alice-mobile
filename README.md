@@ -37,6 +37,8 @@ Versão para Android do [Project Alice](https://github.com/schombert/Project-Ali
 | Toque com três dedos | Abre os **Ajustes do Android**: contador de desempenho, resolução do desenho, limite de FPS, vibração |
 | Voltar | ESC (menu) |
 
+Para digitar (nome de save, chat), toque no campo de texto do jogo: abre o teclado do Android.
+
 Mouse e teclado físicos também funcionam.
 
 ## Mais informações

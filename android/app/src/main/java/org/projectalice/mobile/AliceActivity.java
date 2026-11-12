@@ -20,6 +20,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.ProgressBar;
@@ -46,6 +47,7 @@ public class AliceActivity extends NativeActivity {
 
 	private static native void nativeOnGameFolderPicked(String path);
 	private static native void nativeSetSetting(String key, int value);
+	private static native void nativeOnTextResult(String text);
 
 	private boolean waitingForAllFilesAccess = false;
 	private AlertDialog folderDialog = null;
@@ -313,6 +315,47 @@ public class AliceActivity extends NativeActivity {
 				return;
 			}
 			statsText.setText(text);
+		});
+	}
+
+	/**
+	 * Campo de texto do jogo com foco: a NativeActivity nao recebe os
+	 * caracteres do teclado virtual, entao o texto e digitado aqui e enviado
+	 * ao C++, que substitui o conteudo do campo. Cancelar devolve nulo.
+	 */
+	public void requestText(final String current) {
+		runOnUiThread(() -> {
+			if(isFinishing()) {
+				nativeOnTextResult(null);
+				return;
+			}
+			int padding = (int)(20 * getResources().getDisplayMetrics().density);
+			EditText input = new EditText(this);
+			input.setSingleLine(true);
+			input.setText(current);
+			input.selectAll();
+			LinearLayout layout = new LinearLayout(this);
+			layout.setPadding(padding, padding / 2, padding, 0);
+			layout.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+			final boolean[] answered = { false };
+			AlertDialog dialog = new AlertDialog.Builder(this)
+				.setTitle("Digitar texto")
+				.setView(layout)
+				.setPositiveButton("OK", (d, which) -> {
+					answered[0] = true;
+					nativeOnTextResult(input.getText().toString());
+				})
+				.setNegativeButton("Cancelar", null)
+				.create();
+			dialog.setOnDismissListener(d -> {
+				if(!answered[0])
+					nativeOnTextResult(null);
+			});
+			Window window = dialog.getWindow();
+			if(window != null)
+				window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+			showWithoutSystemBars(dialog);
+			input.requestFocus();
 		});
 	}
 

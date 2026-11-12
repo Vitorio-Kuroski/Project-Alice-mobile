@@ -500,6 +500,10 @@ void android_haptic() {
 	alice_android::call_activity("haptic", "");
 }
 
+void android_request_text(char const* current) {
+	alice_android::call_activity("requestText", current ? current : "");
+}
+
 void android_launcher_update(sys::state& state) {
 	using namespace alice_android;
 	auto& win = *state.win_ptr;
@@ -556,6 +560,18 @@ extern "C" JNIEXPORT void JNICALL Java_org_projectalice_mobile_AliceActivity_nat
 		alice_android::picked_folder = std::string(chars);
 	}
 	env->ReleaseStringUTFChars(path, chars);
+	alice_android::wake_main_loop();
+}
+
+// janela de texto: o texto confirmado, ou nulo se foi cancelada
+extern "C" JNIEXPORT void JNICALL Java_org_projectalice_mobile_AliceActivity_nativeOnTextResult(JNIEnv* env, jclass, jstring text) {
+	if(!text) {
+		window::android_text_result(nullptr);
+	} else {
+		char const* chars = env->GetStringUTFChars(text, nullptr);
+		window::android_text_result(chars);
+		env->ReleaseStringUTFChars(text, chars);
+	}
 	alice_android::wake_main_loop();
 }
 
