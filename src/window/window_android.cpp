@@ -105,6 +105,13 @@ namespace {
 // mouse (sempre em pixels da tela) para as do jogo
 float g_input_scale = 1.f;
 
+// desenhar menos com o jogo parado (ver idle_wait_ms)
+constexpr auto idle_after = std::chrono::seconds(2);
+constexpr auto idle_frame_interval = std::chrono::milliseconds(100);
+std::chrono::steady_clock::time_point last_input_time;
+std::chrono::steady_clock::time_point last_frame_time;
+std::atomic<bool> idle_saver_enabled{ true };
+
 // 1 = um quadro por atualizacao da tela (60 FPS); 2 = um a cada duas (30 FPS)
 int32_t g_swap_interval = 1;
 
@@ -492,6 +499,7 @@ void handle_cmd(android_app* app, int32_t cmd) {
 		break;
 	case APP_CMD_GAINED_FOCUS:
 		win.has_focus = true;
+		last_input_time = std::chrono::steady_clock::now();
 		cpus.apply_now = true;
 		if(win.game_started && state.user_settings.mute_on_focus_lost)
 			sound::resume_all(state);
@@ -1163,8 +1171,42 @@ int32_t handle_key(sys::state& state, AInputEvent* event) {
 	// e de KeyEvent.getUnicodeChar via JNI -- a API nativa nao entrega o caractere.
 }
 
+// ---------------------------------------------------------------------------
+// desenhar menos com o jogo parado
+// ---------------------------------------------------------------------------
+//
+// Com o jogo pausado, sem toque ha alguns segundos e nada novo para mostrar,
+// desenhar 60 quadros por segundo so gasta bateria e esquenta o celular: nessa
+// hora sao ~10. A espera e feita no ALooper_pollOnce do loop, que acorda na
+// hora com qualquer toque ou tecla.
+
+bool can_idle(sys::state& state) {
+	auto const& win = *state.win_ptr;
+	if(!idle_saver_enabled.load(std::memory_order::relaxed) || !win.game_started)
+		return false;
+	if(touch.current != touch_tracker::mode::none)
+		return false; // dedo na tela
+	if(state.actual_game_speed.load(std::memory_order::relaxed) > 0 && !state.ui_pause.load(std::memory_order::relaxed))
+		return false; // o tempo esta correndo
+	if(state.game_state_updated.load(std::memory_order::acquire))
+		return false; // a simulacao mudou algo (ex.: uma ordem executada)
+	return std::chrono::steady_clock::now() - last_input_time > idle_after;
+}
+
+// timeout do ALooper_pollOnce: 0 = desenhar ja; senao, ms ate o proximo quadro
+int idle_wait_ms(sys::state& state) {
+	if(!can_idle(state))
+		return 0;
+	auto const next = last_frame_time + idle_frame_interval;
+	auto const now = std::chrono::steady_clock::now();
+	if(next <= now)
+		return 0;
+	return int(std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count()) + 1;
+}
+
 int32_t handle_input(android_app* app, AInputEvent* event) {
 	auto& state = *static_cast<sys::state*>(app->userData);
+	last_input_time = std::chrono::steady_clock::now();
 	switch(AInputEvent_getType(event)) {
 	case AINPUT_EVENT_TYPE_MOTION:
 		if(AInputEvent_getSource(event) == AINPUT_SOURCE_MOUSE)
@@ -1320,6 +1362,8 @@ void android_set_setting(char const* key, int32_t value) {
 		pending_light_graphics.store(value ? 1 : 0);
 	else if(k == "map_scale")
 		pending_map_scale.store(value);
+	else if(k == "idle_saver")
+		idle_saver_enabled.store(value != 0);
 	else
 		ALICE_LOGE("ajuste desconhecido: %s", key ? key : "(nulo)");
 }
@@ -1364,6 +1408,7 @@ void android_start_game(sys::state& state) {
 	state.on_create();
 	win.loading = false;
 	win.game_started = true;
+	last_input_time = std::chrono::steady_clock::now(); // comeca desenhando em ritmo normal
 
 	// Esta thread le o toque e desenha. Com o tempo correndo, a simulacao ocupa
 	// todos os nucleos (thread do jogo + workers do TBB) e, com a mesma
@@ -1389,8 +1434,9 @@ void run_android_main_loop(sys::state& game_state, android_app* app) {
 	app->onInputEvent = handle_input;
 
 	while(!app->destroyRequested) {
-		// renderizando: so processa o que ja chegou (timeout 0); parado: espera evento
-		int const timeout = can_render(win) ? 0 : -1;
+		// renderizando: so processa o que ja chegou (timeout 0), ou espera ate o
+		// proximo quadro com o jogo parado; sem superficie: espera evento
+		int const timeout = can_render(win) ? idle_wait_ms(game_state) : -1;
 		android_poll_source* source = nullptr;
 		int result = ALooper_pollOnce(timeout, nullptr, nullptr, reinterpret_cast<void**>(&source));
 		while(result >= 0 || result == ALOOPER_POLL_CALLBACK) {
@@ -1413,6 +1459,7 @@ void run_android_main_loop(sys::state& game_state, android_app* app) {
 			update_text_input(game_state);
 			update_touch(game_state);
 			render_frame(game_state);
+			last_frame_time = std::chrono::steady_clock::now();
 			update_perf_counter(game_state);
 		}
 	}
