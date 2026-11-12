@@ -730,6 +730,12 @@ TRIGGER_FUNCTION(tf_x_core_scope_nation) {
 				auto nid = fatten(ws.world, to_nation(p_slot));
 				auto ident = nid.get_identity_holder_as_nation().get_identity();
 
+				auto cores = ident.get_core();
+				// For compliance with expected v2 trigger behaviour
+				if(cores.end() == cores.begin()) {
+					return false;
+				}
+
 				if(*tval & trigger::is_existence_scope) {
 					auto accumulator = existence_accumulator(ws, tval, t_slot, f_slot);
 
@@ -2246,8 +2252,7 @@ TRIGGER_FUNCTION(tf_military_access_tag) {
 	auto holder = ws.world.national_identity_get_nation_from_identity_holder(trigger::payload(tval[1]).tag_id);
 	auto result = ve::apply(
 			[&ws, holder](dcon::nation_id n) {
-				return ws.world.unilateral_relationship_get_military_access(
-						ws.world.get_unilateral_relationship_by_unilateral_pair(holder, n));
+				return military::has_military_access_to(ws, n, holder);
 			},
 			to_nation(primary_slot));
 	return compare_to_true(tval[0], result);
@@ -2255,8 +2260,7 @@ TRIGGER_FUNCTION(tf_military_access_tag) {
 TRIGGER_FUNCTION(tf_military_access_from) {
 	auto result = ve::apply(
 			[&ws](dcon::nation_id n, dcon::nation_id t) {
-				return ws.world.unilateral_relationship_get_military_access(
-						ws.world.get_unilateral_relationship_by_unilateral_pair(t, n));
+				return military::has_military_access_to(ws, n, t);
 			},
 			to_nation(primary_slot), to_nation(from_slot));
 	return compare_to_true(tval[0], result);
@@ -2264,8 +2268,7 @@ TRIGGER_FUNCTION(tf_military_access_from) {
 TRIGGER_FUNCTION(tf_military_access_this_nation) {
 	auto result = ve::apply(
 			[&ws](dcon::nation_id n, dcon::nation_id t) {
-				return ws.world.unilateral_relationship_get_military_access(
-						ws.world.get_unilateral_relationship_by_unilateral_pair(t, n));
+				return military::has_military_access_to(ws, n, t);
 			},
 			to_nation(primary_slot), to_nation(this_slot));
 	return compare_to_true(tval[0], result);
@@ -2274,8 +2277,7 @@ TRIGGER_FUNCTION(tf_military_access_this_state) {
 	auto owner = ws.world.state_instance_get_nation_from_state_ownership(to_state(this_slot));
 	auto result = ve::apply(
 			[&ws](dcon::nation_id n, dcon::nation_id t) {
-				return ws.world.unilateral_relationship_get_military_access(
-						ws.world.get_unilateral_relationship_by_unilateral_pair(t, n));
+				return military::has_military_access_to(ws, n, t);
 			},
 			to_nation(primary_slot), owner);
 	return compare_to_true(tval[0], result);
@@ -2284,8 +2286,7 @@ TRIGGER_FUNCTION(tf_military_access_this_province) {
 	auto owner = ws.world.province_get_nation_from_province_ownership(to_prov(this_slot));
 	auto result = ve::apply(
 			[&ws](dcon::nation_id n, dcon::nation_id t) {
-				return ws.world.unilateral_relationship_get_military_access(
-						ws.world.get_unilateral_relationship_by_unilateral_pair(t, n));
+				return military::has_military_access_to(ws, n, t);
 			},
 			to_nation(primary_slot), owner);
 	return compare_to_true(tval[0], result);
@@ -2294,8 +2295,7 @@ TRIGGER_FUNCTION(tf_military_access_this_pop) {
 	auto owner = nations::owner_of_pop(ws, to_pop(this_slot));
 	auto result = ve::apply(
 			[&ws](dcon::nation_id n, dcon::nation_id t) {
-				return ws.world.unilateral_relationship_get_military_access(
-						ws.world.get_unilateral_relationship_by_unilateral_pair(t, n));
+				return military::has_military_access_to(ws, n, t);
 			},
 			to_nation(primary_slot), owner);
 	return compare_to_true(tval[0], result);
@@ -2818,7 +2818,7 @@ TRIGGER_FUNCTION(tf_total_amount_of_divisions) {
 	return compare_values(tval[0], ws.world.nation_get_active_regiments(to_nation(primary_slot)), int32_t(tval[1]));
 }
 TRIGGER_FUNCTION(tf_money) {
-	return compare_values(tval[0], ws.world.nation_get_stockpiles(to_nation(primary_slot), economy::money),
+	return compare_values(tval[0], ws.world.nation_get_treasury(to_nation(primary_slot)),
 			read_float_from_payload(tval + 1));
 }
 TRIGGER_FUNCTION(tf_suppression_points) {
@@ -2826,7 +2826,7 @@ TRIGGER_FUNCTION(tf_suppression_points) {
 			read_float_from_payload(tval + 1));
 }
 TRIGGER_FUNCTION(tf_money_province) {
-	return compare_values(tval[0], ws.world.nation_get_stockpiles(ws.world.province_get_nation_from_province_ownership(to_prov(primary_slot)), economy::money),
+	return compare_values(tval[0], ws.world.nation_get_treasury(ws.world.province_get_nation_from_province_ownership(to_prov(primary_slot))),
 			read_float_from_payload(tval + 1));
 }
 TRIGGER_FUNCTION(tf_lost_national) {
@@ -5632,7 +5632,7 @@ TRIGGER_FUNCTION(tf_variable_pop_type_name_pop) {
 }
 TRIGGER_FUNCTION(tf_variable_good_name) {
 	auto good = payload(tval[1]).com_id;
-	auto amount = ws.world.nation_get_stockpiles(to_nation(primary_slot), good);
+	auto amount = ws.world.nation_get_total_stockpiles(to_nation(primary_slot), good);
 	return compare_values(tval[0], amount, read_float_from_payload(tval + 2));
 }
 TRIGGER_FUNCTION(tf_religion_nation) {

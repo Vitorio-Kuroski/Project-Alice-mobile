@@ -707,7 +707,7 @@ public:
 		} else {
 			dcon::war_id w = military::find_war_between(state, state.local_player_nation, n);
 			auto box = text::open_layout_box(contents, 0);
-			if(military::are_allied_in_war(state, state.local_player_nation, n)) {
+			if(military::are_on_same_side_in_common_war(state, state.local_player_nation, n)) {
 				text::localised_format_box(state, contents, box, std::string_view("invalid_wartarget_shared_war"));
 			}
 			auto rel = state.world.get_diplomatic_relation_by_diplomatic_pair(state.local_player_nation, n);
@@ -727,7 +727,7 @@ public:
 				}
 			}
 			text::add_line_with_condition(state, contents, "alice_wg_condition_1", !(!is_attacker && military::defenders_have_status_quo_wargoal(state, w)));
-			text::add_line_with_condition(state, contents, "alice_wg_condition_2", bool(!target_in_war));
+			text::add_line_with_condition(state, contents, "alice_wg_condition_2", target_in_war);
 			text::add_line_with_condition(state, contents, "alice_wg_condition_3", !(military::war_goal_would_be_duplicate(state, state.local_player_nation, w, n, c, s, ni, state.world.national_identity_get_nation_from_identity_holder(ni))));
 
 			if((state.world.cb_type_get_type_bits(c) & military::cb_flag::always) == 0) {

@@ -140,6 +140,11 @@ void decline(sys::state& state, message const& m) {
 	}
 }
 
+bool can_accept_peace_offer(const sys::state& state, dcon::nation_id from, dcon::nation_id to, dcon::peace_offer_id) {
+	// Both nations must exist to accept peaceoffers
+	return nations::exists(state,from) && nations::exists(state, to);
+}
+
 bool can_accept_crisis_offer(sys::state& state, dcon::nation_id from, dcon::nation_id to, sys::full_wg offer) {
 	if(state.current_crisis_state != sys::crisis_state::heating_up)
 		return false;
@@ -269,8 +274,9 @@ bool can_accept(sys::state& state, message const& m) {
 		return command::can_call_to_arms(state, m.from, m.to, m.data.war, true, m.automatic_call);
 	case type::be_crisis_primary_attacker:
 	case type::be_crisis_primary_defender:
-	case type::peace_offer:
 		return true;
+	case type::peace_offer:
+		return can_accept_peace_offer(state, m.from, m.to, m.data.peace);
 	case type::take_crisis_side_offer:
 		return can_accept_crisis_offer(state, m.from, m.to, m.data.crisis_offer);
 	case type::crisis_peace_offer:
@@ -292,12 +298,7 @@ void accept(sys::state& state, message const& m) {
 		break;
 	case type::access_request: {
 		nations::adjust_relationship(state, m.from, m.to, state.defines.askmilaccess_relation_on_accept);
-		auto rel = state.world.get_unilateral_relationship_by_unilateral_pair(m.to, m.from);
-		if(!rel) {
-			rel = state.world.force_create_unilateral_relationship(m.to, m.from);
-		}
-		state.world.unilateral_relationship_set_military_access(rel, true);
-
+		military::give_military_access(state, m.from, m.to);
 		notification::post(state, notification::message{
 			[source = m.from, target = m.to](sys::state& state, text::layout_base& contents) {
 				text::add_line(state, contents, "msg_access_granted_1", text::variable_type::x, target, text::variable_type::y, source);

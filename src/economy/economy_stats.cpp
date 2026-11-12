@@ -237,19 +237,19 @@ void register_domestic_supply(
 	ve_register_domestic_supply(state, s, commodity_type, amount, reason);
 }
 
-float price(sys::state const& state, dcon::state_instance_id s, dcon::commodity_id c) {
+float price_slow(sys::state const& state, dcon::state_instance_id s, dcon::commodity_id c) {
 	auto market = state.world.state_instance_get_market_from_local_market(s);
 	return state.world.market_get_price(market, c);
 }
 
-float price(sys::state const& state, dcon::nation_id s, dcon::commodity_id c) {
+float price_slow(sys::state const& state, dcon::nation_id s, dcon::commodity_id c) {
 	auto total_cost = 0.f;
 	auto total_supply = 0.f;
 	state.world.nation_for_each_state_ownership(s, [&](auto soid) {
 		auto sid = state.world.state_ownership_get_state(soid);
 		dcon::market_id market = state.world.state_instance_get_market_from_local_market(sid);
 
-		auto local_price = price(state, market, c);
+		auto local_price = state.world.market_get_price(market, c);
 		auto local_supply = state.world.market_get_supply(market, c);
 
 		total_cost += local_price * local_supply;
@@ -266,11 +266,11 @@ float price(sys::state const& state, dcon::nation_id s, dcon::commodity_id c) {
 	return total_cost / total_supply;
 }
 
-float price(sys::state const& state, dcon::commodity_id c) {
+float price_slow(sys::state const& state, dcon::commodity_id c) {
 	auto total_cost = 0.f;
 	auto total_supply = 0.f;
 	state.world.for_each_market([&](auto m) {
-		auto local_price = price(state, m, c);
+		auto local_price = state.world.market_get_price(m, c);
 		auto local_supply = state.world.market_get_supply(m, c) + 0.0001f;
 
 		total_cost += local_price * local_supply;
@@ -284,10 +284,10 @@ float price(sys::state const& state, dcon::commodity_id c) {
 	return total_cost / total_supply;
 }
 
-float median_price(sys::state const& state, dcon::commodity_id c) {
+float median_price_slow(sys::state const& state, dcon::commodity_id c) {
 	std::vector<float> prices{};
 	state.world.for_each_market([&](auto m) {
-		auto local_price = price(state, m, c);
+		auto local_price = state.world.market_get_price(m, c);
 		prices.push_back(local_price);
 	});
 	std::sort(prices.begin(), prices.end());
@@ -299,12 +299,12 @@ float median_price(sys::state const& state, dcon::commodity_id c) {
 	}
 	return (prices[prices.size() / 2]);
 }
-float median_price(sys::state const& state, dcon::nation_id s, dcon::commodity_id c) {
+float median_price_slow(sys::state const& state, dcon::nation_id s, dcon::commodity_id c) {
 	std::vector<float> prices{};
 	state.world.nation_for_each_state_ownership(s, [&](auto soid) {
 		auto sid = state.world.state_ownership_get_state(soid);
 		dcon::market_id m = state.world.state_instance_get_market_from_local_market(sid);
-		auto local_price = price(state, m, c);
+		auto local_price = state.world.market_get_price(m, c);
 		prices.push_back(local_price);
 	});
 	if(prices.size() == 0) {
@@ -328,7 +328,7 @@ float stockpile(sys::state const& state, dcon::nation_id n, dcon::commodity_id c
 }
 
 
-float price(sys::state const& state, dcon::market_id s, dcon::commodity_id c) {
+float price_slow(sys::state const& state, dcon::market_id s, dcon::commodity_id c) {
 	return state.world.market_get_price(s, c);
 }
 
@@ -348,13 +348,39 @@ float supply(
 	state.world.nation_for_each_state_ownership(s, [&](auto soid) {
 		auto sid = state.world.state_ownership_get_state(soid);
 		auto market = state.world.state_instance_get_market_from_local_market(sid);
-
 		auto local_supply = state.world.market_get_supply(market, c);
 		total_supply += local_supply;
 	});
 
 	return total_supply; //- domestic_trade_volume(state, s, c);
 }
+
+float production(
+	sys::state& state,
+	dcon::market_id s,
+	dcon::commodity_id c
+) {
+	return supply(state, s, c) - trade_supply(state, s ,c);
+}
+
+float production(
+	sys::state& state,
+	dcon::nation_id s,
+	dcon::commodity_id c
+) {
+	auto total_production = 0.f;
+	state.world.nation_for_each_state_ownership(s, [&](auto soid) {
+		auto sid = state.world.state_ownership_get_state(soid);
+		auto market = state.world.state_instance_get_market_from_local_market(sid);
+		auto local_production = production(state, market, c);
+		total_production += local_production;
+	});
+
+	return total_production;
+}
+
+
+
 
 float domestic_trade_volume(
 	sys::state const& state,
@@ -1097,7 +1123,7 @@ float estimate_probability_to_sell_after_supply_increase(sys::state const& state
 float estimate_next_budget(sys::state const& state, dcon::nation_id n) {
 	// treasury is remainder after spending + income
 	// so there is no need to account for income as it's already there
-	auto treasury = state.world.nation_get_stockpiles(n, economy::money);
+	auto treasury = state.world.nation_get_treasury(n);
 	return treasury;
 }
 
@@ -1118,10 +1144,10 @@ market_budget breakdown_market_budget(sys::state const& state, dcon::market_id m
 	market_budget result {};
 
 	state.world.for_each_commodity([&](auto cid) {
-		auto p = price(state, m, cid);
+		auto local_price = state.world.market_get_price(m, cid);
 		//result.bought += (supply(state, m, cid) - trade_supply(state, m, cid)) * p * state.world.market_get_actual_probability_to_sell(m, cid);
 		auto attempt_to_sell = state.world.market_get_stockpile_sales(m, cid);
-		result.sold += attempt_to_sell * p * state.world.market_get_actual_probability_to_sell(m, cid);
+		result.sold += attempt_to_sell * local_price * state.world.market_get_actual_probability_to_sell(m, cid);
 	});
 
 
@@ -1246,7 +1272,7 @@ void make_trade_center_tooltip(sys::state& state, text::columnar_layout& content
 		"factory_bank_out",
 		text::variable_type::val,
 		text::fp_currency{
-			std::max(0.f, state.world.province_get_factory_bank(province) * economy::pops::trade_dividents_rate)
+			std::max(0.f, state.world.province_get_factory_bank(province) * economy::pops::production_dividends_rate)
 		},
 		15
 	);
@@ -1300,7 +1326,7 @@ void make_trade_center_tooltip(sys::state& state, text::columnar_layout& content
 		"rgo_bank_out",
 		text::variable_type::val,
 		text::fp_currency{
-			std::max(0.f, state.world.province_get_rgo_bank(province) * economy::pops::trade_dividents_rate)
+			std::max(0.f, state.world.province_get_rgo_bank(province) * economy::pops::production_dividends_rate)
 		},
 		15
 	);
@@ -1446,9 +1472,9 @@ void make_trade_center_tooltip(sys::state& state, text::columnar_layout& content
 	}
 }
 
-nation_monetary_breakdown breakdown_nation_monetary_structure(sys::state& state, dcon::nation_id n) {
+nation_monetary_breakdown breakdown_nation_monetary_structure(sys::state const& state, dcon::nation_id n) {
 	nation_monetary_breakdown result { };
-	result.nation = state.world.nation_get_stockpiles(n, economy::money);
+	result.nation = state.world.nation_get_treasury(n);
 	result.bank = state.world.nation_get_national_bank(n);
 	result.investment_pool = state.world.nation_get_private_investment(n);
 	state.world.nation_for_each_province_ownership(n, [&](auto poid) {
@@ -1475,7 +1501,7 @@ nation_monetary_breakdown breakdown_nation_monetary_structure(sys::state& state,
 	state.world.nation_for_each_state_ownership(n, [&](auto soid){
 		auto local_state = state.world.state_ownership_get_state(soid);
 		auto mid = state.world.state_instance_get_market_from_local_market(local_state);
-		result.market += state.world.market_get_stockpile(mid, economy::money);
+		result.market += state.world.market_get_stockpile(mid, economy::money) + state.world.market_get_pop_investments(mid) + state.world.market_get_shipbuilding_refund(mid);
 	});
 	state.world.nation_for_each_province_ownership(n, [&](auto poid) {
 		auto pid = state.world.province_ownership_get_province(poid);
@@ -1491,6 +1517,8 @@ nation_monetary_breakdown breakdown_nation_monetary_structure(sys::state& state,
 		state.world.province_for_each_pop_location(pid, [&](auto location) {
 			auto pop = state.world.pop_location_get_pop(location);
 			result.pops += state.world.pop_get_savings(pop);
+
+			/*
 			auto wages = pops::estimate_wage(state, pop);
 			auto slaves = pops::estimate_slave_income(state, pop);
 			result.pops_wages += slaves;
@@ -1516,10 +1544,22 @@ nation_monetary_breakdown breakdown_nation_monetary_structure(sys::state& state,
 
 			result.pops_cashback_housing += budget.housing.spent * (1.f - housing_sat);
 			result.pops_cashback_education += budget.education.spent * (1.f - literacy_sat_paid);
+			*/
 		});
 	});
 
-	result.total = result.nation + result.bank + result.investment_pool + result.rgo + result.market + result.factory + result.pops + result.educators + result.ports + result.landlords + result.artisans;
+	result.total =
+		result.nation
+		+ result.bank
+		+ result.investment_pool
+		+ result.rgo
+		+ result.market
+		+ result.factory
+		+ result.pops
+		+ result.educators
+		+ result.ports
+		+ result.landlords
+		+ result.artisans;
 
 	return result;
 }

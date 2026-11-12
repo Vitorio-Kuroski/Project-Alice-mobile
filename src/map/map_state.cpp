@@ -20,6 +20,8 @@
 //#include <filesystem>
 
 #include <set>
+#include "logistics.hpp"
+#include "logistics_templates.hpp"
 
 namespace map {
 
@@ -168,6 +170,50 @@ void draw_small_square(sys::state& state, display_data& map_data, square::point 
 	map_data.map_drawing_mutex.unlock();
 }
 
+void update_supply_route_arrows(sys::state& state, display_data& map_data) {
+	map_data.strategy_unit_arrow_vertices.clear();
+	map_data.strategy_unit_arrow_counts.clear();
+	map_data.strategy_unit_arrow_starts.clear();
+	if(state.cheat_data.show_mil_routes) {
+		for(auto selected_army : state.selected_armies) {
+			for(auto route : state.world.army_get_army_supply_route(selected_army)) {
+				if(!logistics::supply_route_is_active(state, route.id)) {
+					continue;
+				}
+				// make a copy of the path so that there arent the possibilty of the path being modified while the renderer reads from it
+				auto path = state.world.supply_route_path_get_path(logistics::supply_route_get_path(state, route.id));
+				if(path.size() > 0) {
+					auto path_copy = std::vector<dcon::province_id>(path.begin(), path.end());
+					auto old_size = map_data.strategy_unit_arrow_vertices.size();
+					map_data.strategy_unit_arrow_starts.push_back(GLint(old_size));
+					map::make_supply_route_path(state, map_data.strategy_unit_arrow_vertices, route.id, path_copy, float(map_data.size_x), float(map_data.size_y));
+					map_data.strategy_unit_arrow_counts.push_back(GLsizei(map_data.strategy_unit_arrow_vertices.size() - old_size));
+				}
+			}
+		}
+		for(auto selected_navy : state.selected_navies) {
+			for(auto route : state.world.navy_get_navy_supply_route(selected_navy)) {
+				if(!logistics::supply_route_is_active(state, route.id)) {
+					continue;
+				}
+				// make a copy of the path so that there arent the possibilty of the path being modified while the renderer reads from it
+				auto path = state.world.supply_route_path_get_path(logistics::supply_route_get_path(state, route.id));
+				if(path.size() > 0) {
+					auto path_copy = std::vector<dcon::province_id>(path.begin(), path.end());
+					auto old_size = map_data.strategy_unit_arrow_vertices.size();
+					map_data.strategy_unit_arrow_starts.push_back(GLint(old_size));
+					map::make_supply_route_path(state, map_data.strategy_unit_arrow_vertices, route.id, path_copy, float(map_data.size_x), float(map_data.size_y));
+					map_data.strategy_unit_arrow_counts.push_back(GLsizei(map_data.strategy_unit_arrow_vertices.size() - old_size));
+				}
+			}
+		}
+	}
+	if(!map_data.strategy_unit_arrow_vertices.empty()) {
+		glBindBuffer(GL_ARRAY_BUFFER, map_data.vbo_array[map_data.vo_strategy_unit_arrow]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(curved_line_vertex) * map_data.strategy_unit_arrow_vertices.size(), map_data.strategy_unit_arrow_vertices.data(), GL_STATIC_DRAW);
+	}	
+}
+
 void update_unit_arrows(sys::state& state, display_data& map_data) {
 	map_data.unit_arrow_vertices.clear();
 	map_data.unit_arrow_counts.clear();
@@ -180,10 +226,6 @@ void update_unit_arrows(sys::state& state, display_data& map_data) {
 	map_data.retreat_unit_arrow_vertices.clear();
 	map_data.retreat_unit_arrow_counts.clear();
 	map_data.retreat_unit_arrow_starts.clear();
-
-	map_data.strategy_unit_arrow_vertices.clear();
-	map_data.strategy_unit_arrow_counts.clear();
-	map_data.strategy_unit_arrow_starts.clear();
 
 	map_data.objective_unit_arrow_vertices.clear();
 	map_data.objective_unit_arrow_counts.clear();
@@ -342,10 +384,10 @@ void update_unit_arrows(sys::state& state, display_data& map_data) {
 		glBindBuffer(GL_ARRAY_BUFFER, map_data.vbo_array[map_data.vo_retreat_unit_arrow]);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(curved_line_vertex) * map_data.retreat_unit_arrow_vertices.size(), map_data.retreat_unit_arrow_vertices.data(), GL_STATIC_DRAW);
 	}
-	if(!map_data.strategy_unit_arrow_vertices.empty()) {
+	/*if(!map_data.strategy_unit_arrow_vertices.empty()) {
 		glBindBuffer(GL_ARRAY_BUFFER, map_data.vbo_array[map_data.vo_strategy_unit_arrow]);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(curved_line_vertex) * map_data.strategy_unit_arrow_vertices.size(), map_data.strategy_unit_arrow_vertices.data(), GL_STATIC_DRAW);
-	}
+	}*/
 	if(!map_data.objective_unit_arrow_vertices.empty()) {
 		glBindBuffer(GL_ARRAY_BUFFER, map_data.vbo_array[map_data.vo_objective_unit_arrow]);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(curved_line_vertex) * map_data.objective_unit_arrow_vertices.size(), map_data.objective_unit_arrow_vertices.data(), GL_STATIC_DRAW);
@@ -1824,7 +1866,9 @@ void map_state::update(sys::state& state) {
 	flow_map::update(state);
 
 	update_unit_arrows(state, map_data);
-
+	// Only renders arrows of selected units or navies, and only when debugging it
+	update_supply_route_arrows(state, map_data);
+	
 	// Update railroads, only if railroads are being built and we have 'em enabled
 	if(state.user_settings.railroads_enabled && state.sprawl_update_requested.load(std::memory_order::acquire)) {
 		state.map_state.map_data.update_sprawl(state);
@@ -2035,6 +2079,8 @@ void map_state::on_key_down(sys::virtual_key keycode, sys::key_modifiers mod) {
 		pgdn_key_down = true;
 		break;
 	case sys::virtual_key::SHIFT:
+	case sys::virtual_key::LSHIFT:
+	case sys::virtual_key::RSHIFT:
 		shift_key_down = true;
 		break;
 	default:
@@ -2063,6 +2109,8 @@ void map_state::on_key_up(sys::virtual_key keycode, sys::key_modifiers mod) {
 		pgdn_key_down = false;
 		break;
 	case sys::virtual_key::SHIFT:
+	case sys::virtual_key::LSHIFT:
+	case sys::virtual_key::RSHIFT:
 		shift_key_down = false;
 		break;
 	default:
@@ -2286,6 +2334,10 @@ void map_state::on_lbutton_up(sys::state& state, int32_t x, int32_t y, int32_t s
 		auto screen_size = glm::vec2(screen_size_x, screen_size_y);
 		map_space::point_normalized_inverted_y map_pos;
 		if(!screen_to_map(mouse_pos, screen_size, current_view(state), map_pos)) {
+			return;
+		}
+		// If there are any pending shift selected units AND we are attempting to select more (holding shift), then don't select a province yet as it would deselect all units
+		if((!state.selected_armies.empty() || !state.selected_navies.empty()) && mod == sys::key_modifiers::modifiers_shift) {
 			return;
 		}
 		auto idx = map_space::to_idx(map_pos, (float)map_data.size_x, (float)map_data.size_y);

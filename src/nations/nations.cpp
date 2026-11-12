@@ -150,565 +150,94 @@ void update_cached_values(sys::state& state) {
 }
 
 void restore_unsaved_values(sys::state& state) {
-	for(auto n : state.world.in_nation)
-		n.set_is_great_power(false);
 
-	for(auto& gp : state.great_nations) {
-		state.world.nation_set_is_great_power(gp.nation, true);
-	}
+	concurrency::parallel_invoke(
+		[&]() {
+			for(auto n : state.world.in_nation)
+				n.set_is_great_power(false);
 
-	state.world.for_each_gp_relationship([&](dcon::gp_relationship_id rel) {
-		if((influence::level_mask & state.world.gp_relationship_get_status(rel)) == influence::level_in_sphere) {
-			auto t = state.world.gp_relationship_get_influence_target(rel);
-			auto gp = state.world.gp_relationship_get_great_power(rel);
-			state.world.nation_set_in_sphere_of(t, gp);
-			state.trade_route_cached_values_out_of_date = true;
+			for(auto& gp : state.great_nations) {
+				state.world.nation_set_is_great_power(gp.nation, true);
+			}
+		},
+		[&]() {
+			state.world.for_each_gp_relationship([&](dcon::gp_relationship_id rel) {
+				if((influence::level_mask & state.world.gp_relationship_get_status(rel)) == influence::level_in_sphere) {
+					auto t = state.world.gp_relationship_get_influence_target(rel);
+					auto gp = state.world.gp_relationship_get_great_power(rel);
+					state.world.nation_set_in_sphere_of(t, gp);
+					state.trade_route_cached_values_out_of_date = true;
+				}
+			});
+		},
+		[&]() {
+			state.world.execute_serial_over_nation([&](auto ids) {
+				auto treasury = state.world.nation_get_treasury(ids);
+				state.world.nation_set_last_treasury(ids, treasury);
+			});
+		},
+		[&]() {
+			state.world.for_each_war([&](dcon::war_id war) {
+				static std::vector<dcon::nation_id> attackers;
+				static std::vector<dcon::nation_id> defenders;
+				attackers.clear();
+				defenders.clear();
+				auto participants = state.world.war_get_war_participant(war);
+				for(auto participant : participants) {
+					(participant.get_is_attacker() ? attackers.push_back(participant.get_nation()) : defenders.push_back(participant.get_nation()));
+				}
+				for(auto attacker : attackers) {
+					for(auto defender : defenders) {
+						state.world.nation_set_is_at_war_with(attacker, defender, true);
+						state.world.nation_set_is_at_war_with(defender, attacker, true);
+					}
+				}
+				for(auto attacker : attackers) {
+					for(auto other_attacker : attackers) {
+						if(attacker != other_attacker) {
+							state.world.nation_set_is_on_same_side_in_war_with(attacker, other_attacker, true);
+						}
+					}
+				}
+				for(auto defender : defenders) {
+					for(auto other_defender : defenders) {
+						if(defender != other_defender) {
+							state.world.nation_set_is_on_same_side_in_war_with(defender, other_defender, true);
+						}
+					}
+				}
+			});
+		},
+		[&]() {
+			state.world.for_each_war([&](dcon::war_id war) {
+				auto participants = state.world.war_get_war_participant(war);
+				for(auto participant : participants) {
+					for(auto other_participant : participants) {
+						if(participant != other_participant) {
+							state.world.nation_set_is_in_common_war_with(participant.get_nation(), other_participant.get_nation(), true);
+						}
+					}
+				}
+			});
+		},
+		[&]() {
+			state.world.for_each_unilateral_relationship([&](dcon::unilateral_relationship_id rid) {
+				auto source = state.world.unilateral_relationship_get_source(rid);
+				auto target = state.world.unilateral_relationship_get_target(rid);
+				bool mil_access = state.world.unilateral_relationship_get_military_access(rid);
+				state.world.nation_set_has_military_access_from(target, source, mil_access);
+			});
 		}
-	});
-
-	state.world.execute_serial_over_nation([&](auto ids) {
-		auto treasury = state.world.nation_get_stockpiles(ids, economy::money);
-		state.world.nation_set_last_treasury(ids, treasury);
-	});
-
+	);
 	restore_cached_values(state);
 }
 
-void recalculate_markets_distance(sys::state& state) {
-	state.world.execute_parallel_over_market([&](auto markets) {
-		auto sids = state.world.market_get_zone_from_local_market(markets);
-		auto population = ve::apply([&](auto sid) {
-				return state.world.state_instance_get_demographics(sid, demographics::total);
-			}, sids
-		);
-		auto naval_base = ve::to_float(ve::apply([&](auto sid) {
-				return military::state_naval_base_level(state, sid);
-			}, sids
-		));
-
-		auto railroads = ve::to_float(ve::apply([&](auto sid) {
-			return military::state_railroad_level(state, sid);
-			}, sids
-		));
-
-		auto throughput = 100.f + 8000.f * naval_base + 1000.f * railroads + population / 50.f;
-
-		state.world.market_set_max_throughput(markets, throughput);
-	});
-
-	static tagged_vector<fixed_bool_t, dcon::trade_route_id> to_delete;
-	to_delete.resize(state.world.trade_route_size());
-	std::fill(to_delete.begin(), to_delete.end(), false);
-
-	// distance is calculated in km now
-	// speed is accounted for in calculation of transportation supply
-
-	state.world.execute_parallel_over_trade_route([&](auto routes) {
-		// recalculate effective distance
-		auto markets_0 = state.world.trade_route_get_origin(routes);
-		auto markets_1 = state.world.trade_route_get_target(routes);
-
-		auto sids_0 = state.world.market_get_zone_from_local_market(markets_0);
-		auto sids_1 = state.world.market_get_zone_from_local_market(markets_1);
-
-		ve::apply([&](auto sid_0, auto sid_1, auto route) {
-			if (state.world.trade_route_get_is_sea_route(route)) {
-				std::vector<dcon::province_id> path{ };
-				dcon::province_id p_prev{ };
-
-				auto coast_0 = province::state_get_coastal_capital(state, sid_0);
-				auto coast_1 = province::state_get_coastal_capital(state, sid_1);
-				// if no coastal caapital on either one of them, then delete the sea trade route as it dosent make sense to keep
-				if(!coast_1 || !coast_0) {
-					to_delete[route] = true;
-					return;
-				}
-
-				path = province::make_sea_trade_route_path(state, coast_0, coast_1);
-				p_prev = coast_0;
-
-				auto ps = path.size();
-				auto total_distance_km = 0.f;
-
-				for(size_t i = 0; i < ps; i++) {
-					auto p_current = path[i];
-					auto adj = state.world.get_province_adjacency_by_province_pair(p_prev, p_current);
-					float distance = province::distance_km(state, adj);
-					// sea routes ignore modifiers
-					total_distance_km += distance;
-					p_prev = p_current;
-				}
-
-				state.world.trade_route_set_distance_km(route, total_distance_km);
-			} else {
-				std::vector<dcon::province_id> path{ };
-				dcon::province_id p_prev{ };
-
-				auto market_0_center = state.world.state_instance_get_capital(sid_0);
-				auto market_1_center = state.world.state_instance_get_capital(sid_1);
-				path = province::make_land_trade_path(state, market_0_center, market_1_center);
-
-				p_prev = market_0_center;
-
-				auto ps = path.size();
-				auto total_distance_km = 0.f;
-				auto worst_movement_cost = 0.f;
-				auto min_railroad_level = 0.f;
-
-				for(size_t i = 0; i < ps; i++) {
-					auto p_current = path[i];
-					auto adj = state.world.get_province_adjacency_by_province_pair(p_prev, p_current);
-					auto bits = state.world.province_adjacency_get_type(adj);
-
-					float distance = province::distance_km(state, adj);
-					float sum_mods =
-						state.world.province_get_modifier_values(p_current, sys::provincial_mod_offsets::movement_cost)
-						+ state.world.province_get_modifier_values(p_prev, sys::provincial_mod_offsets::movement_cost);
-
-					// no magical speed-up... for now
-					float local_terrain_mod = std::max(0.f, sum_mods / 2.f - 1.f);
-
-					// rivers ignore terrain
-					if(bits & province::border::river_connection_bit) {
-						local_terrain_mod = 0.f;
-					}
-					
-					float local_distance_km = distance * std::max(0.1f, (1.f + local_terrain_mod));
-
-					total_distance_km += local_distance_km;
-
-					p_prev = p_current;
-				}
-
-				state.world.trade_route_set_distance_km(route, total_distance_km);
-			}
-		}, sids_0, sids_1, routes);
-	});
-	// delete marked trade routes
-	for(auto i = state.world.trade_route_size(); i-- > 0;) {
-		dcon::trade_route_id trade_route{ dcon::trade_route_id::value_base_t(i) };
-		if(to_delete[trade_route]) {
-			state.world.delete_trade_route(trade_route);
-		}
-	}
-}
-
-struct parent_link {
-	dcon::market_id leaf;
-	dcon::market_id parent;
-	float dist;
-};
-
-void generate_sea_trade_routes(sys::state& state) {
-	// buffer for "capitals" of connected regions:
-	std::array<dcon::state_instance_id, 4000> capital_of_region = {};
-	std::array<float, 10000> population_of_region = { };
-	std::vector<float> nation_to_max_population = { };
-	nation_to_max_population.resize(state.world.nation_size());
-
-	state.world.for_each_state_instance([&](auto candidate) {
-		// auto capital = state.world.state_instance_get_capital(candidate);
-		auto capital = province::state_get_coastal_capital(state, candidate);
-		if(capital) {
-			auto connected_region = state.world.province_get_connected_coast_id(capital);
-			auto size = state.world.state_instance_get_demographics(
-				candidate, demographics::total
-			);
-
-			population_of_region[connected_region] += size;
-
-			if(!capital_of_region[connected_region]) {
-				capital_of_region[connected_region] = candidate;
-			} else {
-				auto current_population = state.world.state_instance_get_demographics(
-					capital_of_region[connected_region], demographics::total
-				);
-				if(size > current_population) {
-					capital_of_region[connected_region] = candidate;
-				}
-			}
-		}
-	});
-
-	state.world.for_each_state_instance([&](auto candidate) {
-		auto capital = province::state_get_coastal_capital(state, candidate);
-		if(capital) {
-			auto connected_region = state.world.province_get_connected_coast_id(capital);
-			auto owner = state.world.province_get_nation_from_province_ownership(capital);
-			auto size = population_of_region[connected_region];
-			nation_to_max_population[owner.index()] = std::max(nation_to_max_population[owner.index()], size);
-		}
-	});
-
-	// baseline: connection between new york and london
-
-	constexpr float london_to_ny = 6'000.f;
-	constexpr float london_pop = 4.f * 4.f * 500'000.f;
-	constexpr float ny_pop = 4.f * 4.f * 200'000.f;
-	//constexpr float M = 0.01f * london_to_ny * london_to_ny * london_to_ny / (london_pop + ny_pop * 0.01f);//0.17f * 0.000'000'1f;
-
-
-	float world_population = 0.f;
-	state.world.for_each_nation([&](auto nation) {
-		world_population += state.world.nation_get_demographics(nation, demographics::total);
-	});
-
-	state.world.for_each_state_instance([&](auto origin) {
-		if(!province::state_is_coastal(state, origin))
-			return;
-
-		auto market = state.world.state_instance_get_market_from_local_market(origin);
-
-		auto capital = state.world.state_instance_get_capital(origin);
-		auto owner = state.world.state_instance_get_nation_from_state_ownership(origin);
-		auto state_owner_capital = state.world.nation_get_capital(owner);
-		auto state_owner_capital_state = state.world.province_get_state_membership(state_owner_capital);
-
-		auto naval_base_origin = military::state_naval_base_level(state, origin);
-		auto population_origin = state.world.state_instance_get_demographics(origin, demographics::total);
-		auto coast_0 = province::state_get_coastal_capital(state, origin);
-		auto connected_region = state.world.province_get_connected_coast_id(coast_0);
-		auto connected_region_size = 0.f;
-
-		state.world.for_each_state_instance([&](auto sid) {
-			if(sid == origin)
-				return;
-			if(!province::state_is_coastal(state, sid))
-				return;
-
-			auto coast_1 = province::state_get_coastal_capital(state, sid);
-
-			auto target_market = state.world.state_instance_get_market_from_local_market(sid);
-
-			bool route_already_exists = false;
-			state.world.market_for_each_trade_route_as_origin(market, [&](auto route){
-				auto target = state.world.trade_route_get_target(route);
-				auto owner = state.world.trade_route_get_owner(route);
-				auto sea_route = state.world.trade_route_get_is_sea_route(route);
-				if(target == target_market && owner == market && sea_route) {
-					route_already_exists = true;
-				}
-			});
-			if(route_already_exists) {
-				return;
-			}
-
-			bool same_owner = false;
-			bool different_region = false;
-			bool capital_and_connected_region = false;
-
-			auto target_owner = state.world.state_instance_get_nation_from_state_ownership(sid);
-			if(target_owner == owner) {
-				same_owner = true;
-			}
-
-			auto capital_target = state.world.state_instance_get_capital(sid);
-			auto connected_region_target = state.world.province_get_connected_coast_id(coast_1);
-			if(connected_region != connected_region_target) {
-				different_region = true;
-			}
-
-			if(
-				(
-					capital_of_region[connected_region_target] == sid
-					&&
-					state_owner_capital_state == origin
-				)
-				||
-				(
-					state_owner_capital_state == sid
-					&&
-					capital_of_region[connected_region] == origin
-				)
-			) {
-				capital_and_connected_region = true;
-			}
-
-			auto naval_base_target = military::state_naval_base_level(state, sid);
-			auto state_target_owner_capital = state.world.nation_get_capital(target_owner);
-			auto state_target_owner_capital_state = state.world.province_get_state_membership(state_target_owner_capital);
-			auto continent_target = state.world.province_get_continent(coast_1);
-			auto continent_origin = state.world.province_get_continent(state_owner_capital);
-
-			float mult = 1.f;
-			mult += std::min(naval_base_origin, naval_base_target) * naval_base_level_to_market_attractiveness;
-			bool must_connect = same_owner && different_region && capital_and_connected_region;
-
-			auto distance_approximation = province::direct_distance_km(state, coast_0, coast_1);
-
-
-			float score_origin = population_origin;
-			float score_target = state.world.state_instance_get_demographics(sid, demographics::total);
-			if(capital_of_region[connected_region_target] == sid && capital_of_region[connected_region] == origin) {
-				score_origin = population_of_region[connected_region];
-				score_target = population_of_region[connected_region_target];
-				mult *= 10.f;
-			}
-
-			auto distance_approximation_scale = std::min(1.f, london_to_ny / distance_approximation);
-			distance_approximation_scale = distance_approximation_scale * distance_approximation_scale * distance_approximation_scale;
-			auto pop_scale_origin = score_origin / london_pop;
-			auto pop_scale_target = score_target / ny_pop;
-
-			float score_approximation = (mult * pop_scale_origin * (0.1f + pop_scale_target)) * distance_approximation_scale;
-
-			if(!(score_approximation >= 1.f || must_connect)) {
-				return;
-			}
-
-			auto distance_km = 9999.f;
-			{
-				std::vector<dcon::province_id> path{ };
-				dcon::province_id p_prev{ };
-				path = province::make_sea_trade_route_path(state, coast_0, coast_1);
-				p_prev = coast_0;
-
-				auto ps = path.size();
-				distance_km = 0.f;
-
-				for(size_t i = 0; i < ps; i++) {
-					auto p_current = path[i];
-					auto adj = state.world.get_province_adjacency_by_province_pair(p_prev, p_current);
-					float local_distance = province::distance_km(state, adj);
-					// sea routes ignore modifiers
-					distance_km += local_distance;
-					p_prev = p_current;
-				}
-
-			}
-
-			auto distance_scale = std::min(1.f, london_to_ny / distance_km);
-			distance_scale = distance_scale * distance_scale * distance_scale;
-
-			float score = (mult * pop_scale_origin * (0.1f + pop_scale_target)) * distance_scale;
-
-			if(score >= 1.f || must_connect) {
-				{
-					auto new_route = state.world.force_create_trade_route(market, target_market);
-					state.world.trade_route_set_is_sea_route(new_route, true);
-					state.world.trade_route_set_owner(new_route, market);
-				}
-				{
-					auto opposite_route = state.world.force_create_trade_route(target_market, market);
-					state.world.trade_route_set_is_sea_route(opposite_route, true);
-					state.world.trade_route_set_owner(opposite_route, market);
-				}
-			}
-		});
-	});
-
-	// connect to each other coastal connectivity components:
-	std::vector<parent_link> best_parent;
-	std::vector<bool> parent_found;
-	parent_found.resize(state.world.market_size());
-
-	state.world.for_each_state_instance([&](auto origin) {
-		if(!province::state_is_coastal(state, origin))
-			return;
-		auto origin_market = state.world.state_instance_get_market_from_local_market(origin);
-		auto origin_capital = state.world.state_instance_get_capital(origin);
-		auto origin_owner = state.world.state_instance_get_nation_from_state_ownership(origin);
-		auto origin_connected_region = state.world.province_get_connected_coast_id(origin_capital);
-		auto origin_connected_region_population = population_of_region[origin_connected_region];
-		if(origin != capital_of_region[origin_connected_region]) {
-			return;
-		}
-
-		auto origin_coast = province::state_get_coastal_capital(state, origin);
-
-		parent_found[origin_market.index()] = false;
-
-		bool origin_is_major_node = origin_connected_region_population > 0.7f * nation_to_max_population[origin_owner.index()];
-
-		state.world.for_each_state_instance([&](auto target) {
-			if(origin == target) {
-				return;
-			}
-			if(!province::state_is_coastal(state, target))
-				return;
-			auto target_market = state.world.state_instance_get_market_from_local_market(target);
-			auto target_capital = state.world.state_instance_get_capital(target);
-			auto target_owner = state.world.state_instance_get_nation_from_state_ownership(target);
-			auto target_coast = province::state_get_coastal_capital(state, target);
-			auto target_connected_region = state.world.province_get_connected_coast_id(target_coast);
-			auto target_connected_region_population = population_of_region[target_connected_region];
-
-			if(target != capital_of_region[target_connected_region]) {
-				return;
-			}
-
-			if(target_owner != origin_owner) {
-				return;
-			}
-
-			bool route_already_exists = false;
-			state.world.market_for_each_trade_route_as_origin(origin_market, [&](auto route) {
-				auto target = state.world.trade_route_get_target(route);
-				//auto owner = state.world.trade_route_get_owner(route);
-				//auto sea_route = state.world.trade_route_get_is_sea_route(route);
-				if(target == target_market) {
-					route_already_exists = true;
-				}
-			});
-			if(route_already_exists) {
-				return;
-			}
-
-			bool target_is_major_node = target_connected_region_population > 0.7f * nation_to_max_population[target_owner.index()];
-
-			if(origin_is_major_node && target_is_major_node) {
-				auto new_route_to = state.world.force_create_trade_route(origin_market, target_market);
-				auto new_route_from = state.world.force_create_trade_route(target_market, origin_market);
-				state.world.trade_route_set_is_sea_route(new_route_to, true);
-				state.world.trade_route_set_is_sea_route(new_route_from, true);
-				state.world.trade_route_set_owner(new_route_to, origin_market);
-				state.world.trade_route_set_owner(new_route_from, origin_market);
-				return;
-			}
-
-			if(origin_is_major_node) {
-				best_parent.push_back({
-					target_market,
-					origin_market,
-					province::direct_distance(state, target_capital, origin_capital)
-				});
-				return;
-			}
-
-			if(target_is_major_node) {
-				best_parent.push_back({
-					origin_market,
-					target_market,
-					province::direct_distance(state, target_capital, origin_capital)
-				});
-				return;
-			}
-		});
-	});
-
-	std::sort(best_parent.begin(), best_parent.end(), [&](parent_link& a, parent_link& b) {
-		if(a.dist < b.dist) {
-			return true;
-		}
-		if(a.dist > b.dist) {
-			return false;
-		}
-
-		return (a.leaf.index() < b.leaf.index());
-	});
-
-	for(unsigned i = 0; i < best_parent.size(); i++) {
-		if(parent_found[best_parent[i].leaf.index()]) {
-			continue;
-		}
-
-		parent_found[best_parent[i].leaf.index()] = true;
-
-		auto new_route_to = state.world.force_create_trade_route(best_parent[i].leaf, best_parent[i].parent);
-		auto new_route_from = state.world.force_create_trade_route(best_parent[i].parent, best_parent[i].leaf);
-		state.world.trade_route_set_is_sea_route(new_route_to, true);
-		state.world.trade_route_set_is_sea_route(new_route_from, true);
-		state.world.trade_route_set_owner(new_route_to, best_parent[i].parent);
-		state.world.trade_route_set_owner(new_route_from, best_parent[i].parent);
-	}
-}
-
-void generate_initial_trade_routes(sys::state& state) {
-	// land trade routes
-	state.world.for_each_state_instance([&](auto sid) {
-		auto owner = state.world.state_instance_get_nation_from_state_ownership(sid);
-		auto market = state.world.state_instance_get_market_from_local_market(sid);
-		std::set<dcon::state_instance_id::value_base_t> trade_route_candidates;
-
-		province::for_each_province_in_state_instance(state, sid, [&](auto prov) {
-			// try to create trade routes to neighbors
-			for(auto adj : state.world.province_get_province_adjacency(prov)) {
-				if((adj.get_type() & (province::border::impassible_bit | province::border::coastal_bit)) == 0) {
-					auto other =
-						adj.get_connected_provinces(0) != prov
-						? adj.get_connected_provinces(0)
-						: adj.get_connected_provinces(1);
-
-					if(!other.get_state_membership())
-						continue;
-					if(other.get_state_membership() == sid)
-						continue;
-					if(trade_route_candidates.contains(other.get_state_membership().id.value))
-						continue;
-
-					trade_route_candidates.insert(other.get_state_membership().id.value);
-				}
-			}
-
-			/*
-			Create trade routes through lakes.
-			Lake coasts have both impassible bit and coastal bit
-			*/
-			for(auto adj : state.world.province_get_province_adjacency(prov)) {
-				auto bits = adj.get_type();
-				if((bits & province::border::impassible_bit) == 0) {
-					continue;
-				}
-				if((bits & province::border::coastal_bit) == 0) {
-					continue;
-				}
-
-				auto through =
-					adj.get_connected_provinces(0) != prov
-					? adj.get_connected_provinces(0)
-					: adj.get_connected_provinces(1);
-
-				auto area = state.map_state.map_data.province_area_km2[province::to_map_id(through)];
-				// larger than the caspian sea
-				if(area > 500'000.f) {
-					continue;					
-				}
-
-				for(auto adj2 : state.world.province_get_province_adjacency(through)) {
-					auto bits2 = adj2.get_type();
-					if((bits2 & province::border::impassible_bit) == 0) {
-						continue;
-					}
-					if((bits2 & province::border::coastal_bit) == 0) {
-						continue;
-					}
-					auto other =
-						adj2.get_connected_provinces(0) != through
-						? adj2.get_connected_provinces(0)
-						: adj2.get_connected_provinces(1);
-					if(!other.get_state_membership())
-						continue;
-					if(other.get_state_membership() == sid)
-						continue;
-					if(trade_route_candidates.contains(other.get_state_membership().id.value))
-						continue;
-
-					trade_route_candidates.insert(other.get_state_membership().id.value);
-				}
-			}
-		});
-
-		for(auto candidate_trade_partner_val : trade_route_candidates) {
-			auto si = dcon::state_instance_id{ uint16_t(candidate_trade_partner_val - 1) };
-			auto target_market = state.world.state_instance_get_market_from_local_market(si);
-			auto new_route = state.world.force_create_trade_route(market, target_market);
-			auto opposite_route = state.world.force_create_trade_route(target_market, market);
-			state.world.trade_route_set_is_sea_route(new_route, false);
-			state.world.trade_route_set_is_sea_route(opposite_route, false);
-			state.world.trade_route_set_owner(new_route, market);
-			state.world.trade_route_set_owner(opposite_route, market);
-		}
-	});
-
-	generate_sea_trade_routes(state);
-
-	recalculate_markets_distance(state);
-}
 
 void generate_initial_state_instances(sys::state& state) {
 	for(int32_t i = 0; i < state.province_definitions.first_sea_province.index(); ++i) {
 		dcon::province_id pid{dcon::province_id::value_base_t(i)};
 		auto owner = state.world.province_get_nation_from_province_ownership(pid);
+		auto controller = state.world.province_get_nation_from_province_control(pid);
 		if(owner && !(state.world.province_get_state_membership(pid))) {
 			auto state_instance = fatten(state.world, state.world.create_state_instance());
 			auto new_market = state.world.create_market();
@@ -719,6 +248,7 @@ void generate_initial_state_instances(sys::state& state) {
 			state_instance.set_definition(abstract_state);
 			state_instance.set_capital(pid);
 			state.world.force_create_state_ownership(state_instance, owner);
+			state.world.force_create_state_control(state_instance, controller);
 
 			for(auto mprov : state.world.state_definition_get_abstract_state_membership(abstract_state)) {
 				auto prov = mprov.get_province();
@@ -742,11 +272,9 @@ void generate_initial_state_instances(sys::state& state) {
 	}
 }
 
-bool is_commanding_subject_units(sys::state& state, dcon::nation_id subject, dcon::nation_id overlord) {
-	if(nations::is_nation_subject_of(state, subject, overlord)) {
-		return state.world.nation_get_overlord_commanding_units(subject);
-	}
-	return false;
+bool is_units_commanded_by_overlord(const sys::state& state, dcon::nation_id subject) {
+	auto rel = state.world.nation_get_overlord_as_subject(subject);
+	return state.world.overlord_get_commanding_units(rel);
 }
 
 bool can_release_as_vassal(sys::state const& state, dcon::nation_id n, dcon::national_identity_id releasable) {
@@ -771,8 +299,8 @@ bool identity_has_holder(sys::state const& state, dcon::national_identity_id ide
 	return bool(fat_ident.get_nation_from_identity_holder().id);
 }
 
-bool are_allied(sys::state& state, dcon::nation_id a, dcon::nation_id b) {
-	auto rel = state.world.get_diplomatic_relation_by_diplomatic_pair(a, b);
+bool are_allied(const sys::state& state, dcon::nation_id a, dcon::nation_id b) {
+	auto rel = const_cast<sys::state&>(state).world.get_diplomatic_relation_by_diplomatic_pair(a, b);
 	return state.world.diplomatic_relation_get_are_allied(rel);
 }
 
@@ -803,6 +331,52 @@ dcon::text_key name_from_tag(sys::state& state, dcon::national_identity_id tag) 
 	else
 		return state.world.national_identity_get_name(tag);
 }
+
+
+template<concepts::construction_type con_type>
+int8_t get_nation_construction_consumption_setting_by_type(const sys::state& state, dcon::nation_id nation) {
+	if constexpr(std::is_same_v<con_type, dcon::province_land_construction_id>) {
+		return state.world.nation_get_army_construction_consumption(nation);
+	} else if constexpr(std::is_same_v<con_type, dcon::province_naval_construction_id>) {
+		return state.world.nation_get_navy_construction_consumption(nation);
+	} else if constexpr(std::is_same_v<con_type, dcon::factory_construction_id>) {
+		return state.world.nation_get_factory_construction_consumption(nation);
+	} else if constexpr(std::is_same_v<con_type, dcon::province_building_construction_id>) {
+		return state.world.nation_get_building_construction_consumption(nation);
+	}
+}
+template int8_t get_nation_construction_consumption_setting_by_type<dcon::province_land_construction_id>(const sys::state& state, dcon::nation_id nation);
+template int8_t get_nation_construction_consumption_setting_by_type<dcon::province_naval_construction_id>(const sys::state& state, dcon::nation_id nation);
+template int8_t get_nation_construction_consumption_setting_by_type<dcon::factory_construction_id>(const sys::state& state, dcon::nation_id nation);
+template int8_t get_nation_construction_consumption_setting_by_type<dcon::province_building_construction_id>(const sys::state& state, dcon::nation_id nation);
+
+template<typename unit_type, military::unit_consumption_type consumption_type>
+requires(concepts::military_unit<unit_type> || concepts::military_subunit<unit_type>)
+int8_t get_nation_military_consumption_setting_by_type(const sys::state& state, dcon::nation_id nation) {
+	if constexpr(std::is_same_v<unit_type, dcon::army_id> || std::is_same_v<unit_type, dcon::regiment_id>) {
+		if constexpr(consumption_type == military::unit_consumption_type::supply) {
+			return state.world.nation_get_land_supply_consumption(nation);
+		}
+		else if constexpr(consumption_type == military::unit_consumption_type::reinforcement) {
+			return state.world.nation_get_land_reinforcement_consumption(nation);
+		}
+	} else if constexpr(std::is_same_v<unit_type, dcon::navy_id> || std::is_same_v<unit_type, dcon::ship_id>) {
+		if constexpr(consumption_type == military::unit_consumption_type::supply) {
+			return state.world.nation_get_naval_supply_consumption(nation);
+		} else if constexpr(consumption_type == military::unit_consumption_type::reinforcement) {
+			return state.world.nation_get_naval_reinforcement_consumption(nation);
+		}
+	}
+}
+template int8_t get_nation_military_consumption_setting_by_type<dcon::army_id, military::unit_consumption_type::supply>(const sys::state& state, dcon::nation_id nation);
+template int8_t get_nation_military_consumption_setting_by_type<dcon::army_id, military::unit_consumption_type::reinforcement>(const sys::state& state, dcon::nation_id nation);
+template int8_t get_nation_military_consumption_setting_by_type<dcon::navy_id, military::unit_consumption_type::supply>(const sys::state& state, dcon::nation_id nation);
+template int8_t get_nation_military_consumption_setting_by_type<dcon::navy_id, military::unit_consumption_type::reinforcement>(const sys::state& state, dcon::nation_id nation);
+template int8_t get_nation_military_consumption_setting_by_type<dcon::regiment_id, military::unit_consumption_type::supply>(const sys::state& state, dcon::nation_id nation);
+template int8_t get_nation_military_consumption_setting_by_type<dcon::regiment_id, military::unit_consumption_type::reinforcement>(const sys::state& state, dcon::nation_id nation);
+template int8_t get_nation_military_consumption_setting_by_type<dcon::ship_id, military::unit_consumption_type::supply>(const sys::state& state, dcon::nation_id nation);
+template int8_t get_nation_military_consumption_setting_by_type<dcon::ship_id, military::unit_consumption_type::reinforcement>(const sys::state& state, dcon::nation_id nation);
+
 
 // updates ONLY national admin
 void update_national_administrative_efficiency(sys::state& state) {
@@ -910,10 +484,10 @@ float control_shift_weight_mult(sys::state const& state, dcon::province_adjacenc
 	}
 
 	auto movement_A = 1.f + std::max(0.f, (
-		state.world.province_get_modifier_values(A, sys::provincial_mod_offsets::movement_cost) + 1.f
+		province::movement_cost(state, A)
 		));
 	auto movement_B = 1.f + std::max(0.f, (
-		state.world.province_get_modifier_values(B, sys::provincial_mod_offsets::movement_cost) + 1.f
+		province::movement_cost(state, B)
 		));
 	auto distance = state.world.province_adjacency_get_distance(adj) * (movement_A * movement_B);
 
@@ -1143,7 +717,7 @@ void update_administrative_efficiency(sys::state& state) {
 		auto river_multiplier = ve::select(has_major_river, reduced_multiplier, normal_multiplier); // Rivers reduce decay by 20%
 		auto movement = ve::max(
 			0.f,
-			state.world.province_get_modifier_values(pids, sys::provincial_mod_offsets::movement_cost) + 1.f
+			province::movement_cost(state, pids)
 		); // High movement cost increases decay
 		auto attrition = ve::max(
 			0.f,
@@ -1207,6 +781,16 @@ float priority_private(sys::state& state, dcon::nation_id n, dcon::factory_type_
 	} else {
 		return state.world.nation_get_factory_type_experience_priority_private(n, ftid) / total_priority;
 	}
+}
+
+float cb_generation_speed_modifier(const sys::state& state, dcon::nation_id nation) {
+	return std::max(state.world.nation_get_modifier_values(nation, sys::national_mod_offsets::cb_generation_speed_modifier) + 1.0f, 0.01f); // Can't go below 1% efficiency
+}
+
+float cb_justification_speed(const sys::state& state, dcon::nation_id nation, dcon::cb_type_id cb) {
+	float cb_speed = state.world.cb_type_get_construction_speed(cb);
+	float mods = cb_generation_speed_modifier(state, nation);
+	return state.defines.cb_generation_base_speed * cb_speed * mods;
 }
 
 void update_research_points(sys::state& state) {
@@ -1370,12 +954,13 @@ void update_military_scores(sys::state& state) {
 
 float prestige_score(sys::state const& state, dcon::nation_id n) {
 	return std::max(0.0f, state.world.nation_get_prestige(n) +
-				 state.world.nation_get_modifier_values(n, sys::national_mod_offsets::permanent_prestige));
+				state.world.nation_get_modifier_values(n, sys::national_mod_offsets::permanent_prestige));
 }
 
 void update_rankings(sys::state& state) {
 	uint32_t to_sort_count = 0;
 	state.world.for_each_nation([&](dcon::nation_id n) {
+		state.world.nation_set_is_great_power_candidate(n, false);
 		state.nations_by_rank[to_sort_count] = n;
 		++to_sort_count;
 	});
@@ -1388,7 +973,7 @@ void update_rankings(sys::state& state) {
 				}
 				if(fa.get_is_civilized() != fb.get_is_civilized())
 					return fa.get_is_civilized();
-				if(bool(fa.get_overlord_as_subject().get_ruler()) != bool(fa.get_overlord_as_subject().get_ruler()))
+				if(bool(fa.get_overlord_as_subject().get_ruler()) != bool(fb.get_overlord_as_subject().get_ruler()))
 					return !bool(fa.get_overlord_as_subject().get_ruler());
 				auto a_score = fa.get_military_score() + fa.get_industrial_score() + prestige_score(state, a);
 				auto b_score = fb.get_military_score() + fb.get_industrial_score() + prestige_score(state, b);
@@ -1400,7 +985,92 @@ void update_rankings(sys::state& state) {
 		state.nations_by_rank[to_sort_count] = dcon::nation_id{};
 	}
 	for(uint32_t i = 0; i < to_sort_count; ++i) {
-		state.world.nation_set_rank(state.nations_by_rank[i], uint16_t(i + 1));
+		auto nation = state.nations_by_rank[i];
+		state.world.nation_set_rank(nation, uint16_t(i + 1));
+		auto ov_rel =  state.world.nation_get_overlord_as_subject(nation);
+		auto ov = state.world.overlord_get_ruler(ov_rel);
+		if(i < state.defines.great_nations_count && !(bool)(ov) && state.world.nation_get_owned_province_count(nation) > 0) {
+			state.world.nation_set_is_great_power_candidate(nation, true);
+		}
+	}
+}
+
+void init_rankings_lua(sys::state& state) {
+	if(state.lua_nation_ranking_function_index == LUA_REFNIL) {
+		auto stack_size_at_start = lua_gettop(state.lua_game_loop_environment);
+		lua_getfield(state.lua_game_loop_environment, LUA_GLOBALSINDEX, "UPDATE_GREAT_POWERS"); // [function
+		state.lua_nation_ranking_function_index = luaL_ref(state.lua_game_loop_environment, LUA_REGISTRYINDEX); // [
+		assert(lua_gettop(state.lua_game_loop_environment) == stack_size_at_start);
+
+		if(state.lua_nation_ranking_function_index == LUA_REFNIL) {
+			state.lua_nation_ranking_function_is_missing = true;
+		} else {
+			state.lua_nation_ranking_function_is_missing = false;
+		}
+	}
+	if(state.lua_nation_ranking_function_index != LUA_REFNIL) {
+		lua_rawgeti(state.lua_game_loop_environment, LUA_REGISTRYINDEX, state.lua_nation_ranking_function_index);
+		lua_pushnumber(state.lua_game_loop_environment, state.defines.great_nations_count);
+		auto pcall_result = lua_pcall(state.lua_game_loop_environment, 1, 0, 0);
+		if(pcall_result) {
+			state.lua_notification(lua_tostring(state.lua_game_loop_environment, -1));
+			lua_settop(state.lua_game_loop_environment, 0);
+		}
+
+		// Lua script has updated ranking, now we have to update the list
+
+		int count_of_great_powers = 0;
+		state.world.for_each_nation([&](dcon::nation_id n) {
+			if(state.world.nation_get_is_great_power_candidate(n)) {
+				count_of_great_powers++;
+			}
+		});
+		state.great_nations.resize(count_of_great_powers);
+		state.world.for_each_nation([&](dcon::nation_id n) {
+			int rank_from_zero = (int)(state.world.nation_get_rank(n)) - 1;
+			state.nations_by_rank[rank_from_zero] = n;
+			if(state.world.nation_get_is_great_power_candidate(n)) {
+				state.great_nations[rank_from_zero] = { sys::date{0}, n };
+				state.world.nation_set_is_great_power(n, true);
+			}
+		});
+	}
+}
+
+static int convert_error_to_traceback(lua_State* L) {
+	const char *message = lua_tostring(L, -1);
+	luaL_traceback(L, L, message, 0);
+	return 1;
+}
+
+void update_rankings_lua(sys::state& state) {
+	if(state.lua_nation_ranking_function_index == LUA_REFNIL) {
+		auto stack_size_at_start = lua_gettop(state.lua_game_loop_environment);
+		lua_getfield(state.lua_game_loop_environment, LUA_GLOBALSINDEX, "UPDATE_GREAT_POWERS"); // [function
+		state.lua_nation_ranking_function_index = luaL_ref(state.lua_game_loop_environment, LUA_REGISTRYINDEX); // [
+		assert(lua_gettop(state.lua_game_loop_environment) == stack_size_at_start);
+
+		if(state.lua_nation_ranking_function_index == LUA_REFNIL) {
+			state.lua_nation_ranking_function_is_missing = true;
+		} else {
+			state.lua_nation_ranking_function_is_missing = false;
+		}
+	}
+	if(state.lua_nation_ranking_function_index != LUA_REFNIL) {
+		lua_pushcfunction(state.lua_game_loop_environment, convert_error_to_traceback);
+		lua_rawgeti(state.lua_game_loop_environment, LUA_REGISTRYINDEX, state.lua_nation_ranking_function_index);
+		lua_pushnumber(state.lua_game_loop_environment, (int)(state.defines.great_nations_count));
+		auto pcall_result = lua_pcall(state.lua_game_loop_environment, 1, 0, -3);
+		if(pcall_result) {
+			state.lua_notification(lua_tostring(state.lua_game_loop_environment, -1));
+			lua_settop(state.lua_game_loop_environment, 0);
+		}
+
+		// Lua script has updated ranks, now we have to update the list
+		state.world.for_each_nation([&](dcon::nation_id n) {
+			int rank_from_zero = (int)(state.world.nation_get_rank(n)) - 1;
+			state.nations_by_rank[rank_from_zero] = n;
+		});
 	}
 }
 
@@ -1422,9 +1092,9 @@ void update_ui_rankings(sys::state& state) {
 					return true;
 				if(!fa.get_is_civilized() && fb.get_is_civilized())
 					return false;
-				if(bool(fa.get_overlord_as_subject()) && !bool(fa.get_overlord_as_subject()))
+				if(bool(fa.get_overlord_as_subject()) && !bool(fb.get_overlord_as_subject()))
 					return false;
-				if(!bool(fa.get_overlord_as_subject()) && bool(fa.get_overlord_as_subject()))
+				if(!bool(fa.get_overlord_as_subject()) && bool(fb.get_overlord_as_subject()))
 					return true;
 				auto a_score = fa.get_industrial_score();
 				auto b_score = fb.get_industrial_score();
@@ -1440,9 +1110,9 @@ void update_ui_rankings(sys::state& state) {
 					return true;
 				if(!fa.get_is_civilized() && fb.get_is_civilized())
 					return false;
-				if(bool(fa.get_overlord_as_subject()) && !bool(fa.get_overlord_as_subject()))
+				if(bool(fa.get_overlord_as_subject()) && !bool(fb.get_overlord_as_subject()))
 					return false;
-				if(!bool(fa.get_overlord_as_subject()) && bool(fa.get_overlord_as_subject()))
+				if(!bool(fa.get_overlord_as_subject()) && bool(fb.get_overlord_as_subject()))
 					return true;
 				auto a_score = fa.get_military_score();
 				auto b_score = fb.get_military_score();
@@ -1458,9 +1128,9 @@ void update_ui_rankings(sys::state& state) {
 					return true;
 				if(!fa.get_is_civilized() && fb.get_is_civilized())
 					return false;
-				if(bool(fa.get_overlord_as_subject()) && !bool(fa.get_overlord_as_subject()))
+				if(bool(fa.get_overlord_as_subject()) && !bool(fb.get_overlord_as_subject()))
 					return false;
-				if(!bool(fa.get_overlord_as_subject()) && bool(fa.get_overlord_as_subject()))
+				if(!bool(fa.get_overlord_as_subject()) && bool(fb.get_overlord_as_subject()))
 					return true;
 				auto a_score = prestige_score(state, a);
 				auto b_score = prestige_score(state, b);
@@ -1483,11 +1153,13 @@ void update_great_powers(sys::state& state) {
 	bool at_least_one_added = false;
 
 	for(auto i = state.great_nations.size(); i-- > 0;) {
-		if(state.world.nation_get_rank(state.great_nations[i].nation) <= uint16_t(state.defines.great_nations_count)) {
+		if(state.world.nation_get_is_great_power_candidate(state.great_nations[i].nation)) {
 			// is still a gp
 			state.great_nations[i].last_greatness = state.current_date;
-		} else if(state.great_nations[i].last_greatness + int32_t(state.defines.greatness_days) < state.current_date ||
-							state.world.nation_get_owned_province_count(state.great_nations[i].nation) == 0) {
+		} else if(
+			state.great_nations[i].last_greatness + int32_t(state.defines.greatness_days) < state.current_date
+		) {
+			// not a gp candidate and enough time has passed
 			state.trade_route_cached_values_out_of_date = true;
 
 			auto n = state.great_nations[i].nation;
@@ -1523,7 +1195,7 @@ void update_great_powers(sys::state& state) {
 
 	for(uint32_t i = 0; i < uint32_t(state.defines.great_nations_count) && state.great_nations.size() < size_t(state.defines.great_nations_count); ++i) {
 		auto n = state.nations_by_rank[i];
-		if(n && !state.world.nation_get_is_great_power(n) && state.world.nation_get_owned_province_count(n) > 0) {
+		if(n && !state.world.nation_get_is_great_power(n) && state.world.nation_get_is_great_power_candidate(n)) {
 			at_least_one_added = true;
 			state.world.nation_set_is_great_power(n, true);
 			state.great_nations.push_back(sys::great_nation(state.current_date, n));
@@ -1997,7 +1669,8 @@ void update_monthly_points(sys::state& state) {
 	- Once relations are at 100, monthly increases cannot take them higher
 	*/
 	for(auto so : state.world.in_overlord) {
-		monthly_adjust_relationship(state, so.get_ruler(), so.get_subject(), 0.25f);
+		if(so.get_ruler())
+			monthly_adjust_relationship(state, so.get_ruler(), so.get_subject(), 0.25f);
 	}
 	for(auto an : state.world.in_nation_adjacency) {
 		if(an.get_connected_nations(0).get_is_at_war() == false && an.get_connected_nations(1).get_is_at_war() == false)
@@ -2028,7 +1701,7 @@ void update_monthly_points(sys::state& state) {
 }
 
 float get_treasury(sys::state& state, dcon::nation_id n) {
-	return state.world.nation_get_stockpiles(n, economy::money);
+	return state.world.nation_get_treasury(n);
 }
 
 float get_bank_funds(sys::state& state, dcon::nation_id n) {
@@ -2036,7 +1709,7 @@ float get_bank_funds(sys::state& state, dcon::nation_id n) {
 }
 
 float get_debt(sys::state& state, dcon::nation_id n) {
-	auto v = state.world.nation_get_stockpiles(n, economy::money);
+	auto v = state.world.nation_get_treasury(n);
 	return v < 0.0f ? -v : 0.0f;
 }
 
@@ -2045,8 +1718,10 @@ float tariff_efficiency(sys::state const& state, dcon::nation_id n, dcon::market
 	auto sid = state.world.market_get_zone_from_local_market(m);
 	auto pid = state.world.state_instance_get_capital(sid);
 	auto eff_mod = state.world.nation_get_modifier_values(n, sys::national_mod_offsets::tariff_efficiency_modifier);
-	auto adm_eff = state.world.province_get_control_scale(pid);
-	return std::clamp((state.defines.base_tariff_efficiency + eff_mod) * adm_eff, 0.f, 1.f);
+	auto adm_eff = state.world.province_get_control_ratio(pid);
+	// Reasoning for treating control ratio as a tariff efficiency modifier: In base V2, pretty much the only source of tariff efficiency modifier is from buraucrats (admin efficiency). Since control replaces that, it should be treated similarly
+	// If it acted as a multiplicative modifier, the tariff efficiency would never exceed 20% in vanilla (the base tariff modifiers)
+	return std::clamp((state.defines.base_tariff_efficiency + eff_mod + adm_eff), 0.f, 1.f);
 }
 
 // Calculates all modifiers to tax efficiency from modifiers + base taxe efficiency
@@ -2124,7 +1799,7 @@ void switch_all_players(sys::state& state, dcon::nation_id new_n, dcon::nation_i
 	
 	if(state.current_scene.game_in_progress) {
 		// give back units if puppet becomes player controlled while the game is running. This is also done when the game starts and goes from lobby to game in progress
-		if(bool(state.world.nation_get_overlord_as_subject(new_n)) && state.world.nation_get_overlord_commanding_units(new_n)) {
+		if(is_vassal(state, new_n)) {
 			military::give_back_units(state, new_n);
 		}
 	}
@@ -2216,9 +1891,14 @@ void create_nation_based_on_template(sys::state& state, dcon::nation_id n, dcon:
 	state.world.nation_set_land_spending(n, int8_t(100));
 	state.world.nation_set_naval_spending(n, int8_t(100));
 	state.world.nation_set_construction_spending(n, int8_t(100));
-	state.world.nation_set_effective_land_spending(n, 1.0f);
-	state.world.nation_set_effective_naval_spending(n, 1.0f);
-	state.world.nation_set_effective_construction_spending(n, 1.0f);
+	state.world.nation_set_naval_supply_consumption(n, int8_t(100));
+	state.world.nation_set_naval_reinforcement_consumption(n, int8_t(100));
+	state.world.nation_set_land_supply_consumption(n, int8_t(100));
+	state.world.nation_set_naval_supply_consumption(n, int8_t(100));
+	state.world.nation_set_army_construction_consumption(n, int8_t(100));
+	state.world.nation_set_navy_construction_consumption(n, int8_t(100));
+	state.world.nation_set_factory_construction_consumption(n, int8_t(100));
+	state.world.nation_set_building_construction_consumption(n, int8_t(100));
 	state.world.nation_set_spending_level(n, 1.0f);
 	state.world.nation_set_poor_tax(n, int8_t(50));
 	state.world.nation_set_middle_tax(n, int8_t(50));
@@ -2264,15 +1944,13 @@ void create_nation_based_on_template(sys::state& state, dcon::nation_id n, dcon:
 	politics::update_displayed_identity(state, n);
 }
 
+bool exists(const sys::state& state, dcon::nation_id nation) {
+	return state.world.nation_get_owned_province_count(nation) > 0;
+}
+
 bool exists_or_is_utility_tag(sys::state& state, dcon::nation_id nation) {
-	return state.world.nation_get_owned_province_count(nation) > 0 || state.world.nation_get_utility_tag(nation);
+	return exists(state, nation) || state.world.nation_get_utility_tag(nation);
 }
-
-ve::mask_vector exists_or_is_utility_tag(sys::state& state, ve::contiguous_tags<dcon::nation_id> nations) {
-	return (state.world.nation_get_owned_province_count(nations) != 0) || state.world.nation_get_utility_tag(nations);
-}
-
-
 
 void run_gc(sys::state& state) {
 	//cleanup (will set gc pending)
@@ -2320,15 +1998,15 @@ void cleanup_nation(sys::state& state, dcon::nation_id n) {
 		release_vassal(state, ol);
 	}
 
-	//auto armies = state.world.nation_get_army_control(n);
-	//while(armies.begin() != armies.end()) {
-	//	military::cleanup_army(state, (*armies.begin()).get_army());
-	//}
+	auto armies = state.world.nation_get_army_control(n);
+	while(armies.begin() != armies.end()) {
+		military::cleanup_army(state, (*armies.begin()).get_army());
+	}
 
-	//auto navies = state.world.nation_get_navy_control(n);
-	//while(navies.begin() != navies.end()) {
-	//	military::cleanup_navy(state, (*navies.begin()).get_navy());
-	//}
+	auto navies = state.world.nation_get_navy_control(n);
+	while(navies.begin() != navies.end()) {
+		military::cleanup_navy(state, (*navies.begin()).get_navy());
+	}
 
 	//auto rebels = state.world.nation_get_rebellion_within(n);
 	//while(rebels.begin() != rebels.end()) {
@@ -2354,6 +2032,13 @@ void cleanup_nation(sys::state& state, dcon::nation_id n) {
 	while(movements.begin() != movements.end()) {
 		state.world.delete_movement((*movements.begin()).get_movement());
 	}
+	// Reset cached bitfields pointing to this nation
+	state.world.execute_serial_over_nation([&](auto nations) {
+		state.world.nation_set_is_at_war_with(nations, n, ve::vbitfield_type{ 0 });
+		state.world.nation_set_has_military_access_from(nations, n, ve::vbitfield_type{ 0 });
+		state.world.nation_set_is_on_same_side_in_war_with(nations, n, ve::vbitfield_type{ 0 });
+		state.world.nation_set_is_in_common_war_with(nations, n, ve::vbitfield_type{ 0 });
+	});
 
 	// transfer flags and variables to new holder
 	state.world.delete_nation(n);
@@ -2696,7 +2381,7 @@ void make_substate(sys::state& state, dcon::nation_id subject, dcon::nation_id o
 		state.trade_route_cached_values_out_of_date = true;
 		state.world.nation_set_is_substate(subject, true);
 		state.world.nation_get_vassals_count(overlord)++;
-		state.world.nation_get_substates_count(current_ruler)++;
+		state.world.nation_get_substates_count(overlord)++;
 		// clear alliances of subject to prevent potential tomfoolery by the subject
 		clear_alliances(state, subject);
 		clear_all_embargoes(state, subject);
@@ -3829,6 +3514,19 @@ void update_crisis(sys::state& state) {
 			});
 		}
 	}
+}
+
+void get_existing_nations(const sys::state& state, std::vector<dcon::nation_id>& vec_out) {
+	for(dcon::nation_id n : state.world.in_nation) {
+		if(exists(state, n)) {
+			vec_out.push_back(n);
+		}
+	}
+}
+std::vector<dcon::nation_id> get_existing_nations(const sys::state& state) {
+	std::vector<dcon::nation_id> nations{ };
+	get_existing_nations(state, nations);
+	return nations;
 }
 
 void update_pop_acceptance(sys::state& state, dcon::nation_id n) {

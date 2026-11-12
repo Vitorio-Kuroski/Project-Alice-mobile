@@ -785,8 +785,8 @@ void  province_economy_overview_body_high_prices_t::update(sys::state& state, la
 	auto mid = state.world.state_instance_get_market_from_local_market(sid);
 
 	std::sort(base_data.begin(), base_data.end(), [&](auto a, auto b) {
-		auto value_a = economy::price(state, mid, a) / state.world.commodity_get_median_price(a);
-		auto value_b = economy::price(state, mid, b) / state.world.commodity_get_median_price(b);
+		auto value_a = state.world.market_get_price(mid, a) / state.world.commodity_get_median_price(a);
+		auto value_b = state.world.market_get_price(mid, b) / state.world.commodity_get_median_price(b);
 		if(value_a == value_b) {
 			return a.value > b.value;
 		}
@@ -842,8 +842,8 @@ void  province_economy_overview_body_low_prices_t::update(sys::state& state, lay
 	auto mid = state.world.state_instance_get_market_from_local_market(sid);
 
 	std::sort(base_data.begin(), base_data.end(), [&](auto a, auto b) {
-		auto value_a = economy::price(state, mid, a) / state.world.commodity_get_median_price(a);
-		auto value_b = economy::price(state, mid, b) / state.world.commodity_get_median_price(b);
+		auto value_a = economy::price_slow(state, mid, a) / state.world.commodity_get_median_price(a);
+		auto value_b = economy::price_slow(state, mid, b) / state.world.commodity_get_median_price(b);
 		if(value_a == value_b) {
 			return a.value > b.value;
 		}
@@ -1253,17 +1253,19 @@ void province_economy_overview_body_import_value_graph_t::on_update(sys::state& 
 		auto flow = economy::trade_value_flow(state, origin, mid);
 		auto origin_sid = state.world.market_get_zone_from_local_market(origin);
 		auto origin_nation = state.world.state_instance_get_nation_from_state_ownership(origin_sid);
-
-		per_nation_data[origin_nation.index()] += flow;
-		total_left += flow;
+		// In the unlikely chance that the per-nation buffer was created just as a nation was deleted
+		if(size_t(origin_nation.index()) < per_nation_data.size()) {
+			per_nation_data[origin_nation.index()] += flow;
+			total_left += flow;
+		}
 	});
 
 	raw_content.clear();
-
-	state.world.for_each_nation([&](auto origin) {
+	for(uint32_t i = 0; i < per_nation_data.size(); i++) {
+		dcon::nation_id origin{ dcon::nation_id::value_base_t(i) };
 		entry_before_merge temp{ origin, per_nation_data[origin.index()] };
 		raw_content.push_back(temp);
-	});
+	}
 
 	std::sort(raw_content.begin(), raw_content.end(), [&](auto a, auto b) {
 		if(a.value == b.value) {
@@ -3241,7 +3243,7 @@ void province_economy_overview_price_entry_local_price_t::on_update(sys::state& 
 	auto sid = state.world.province_get_state_membership(pid);
 	auto mid = state.world.state_instance_get_market_from_local_market(sid);
 	auto cid = price_entry.commodity;
-	set_text(state, text::format_money(economy::price(state, mid, cid)));
+	set_text(state, text::format_money(economy::price_slow(state, mid, cid)));
 // END
 }
 void province_economy_overview_price_entry_ratio_t::on_update(sys::state& state) noexcept {
@@ -3252,7 +3254,7 @@ void province_economy_overview_price_entry_ratio_t::on_update(sys::state& state)
 	auto sid = state.world.province_get_state_membership(pid);
 	auto mid = state.world.state_instance_get_market_from_local_market(sid);
 	auto cid = price_entry.commodity;
-	set_text(state, text::format_percentage(economy::price(state, mid, cid) / state.world.commodity_get_median_price(price_entry.commodity)));
+	set_text(state, text::format_percentage(economy::price_slow(state, mid, cid) / state.world.commodity_get_median_price(price_entry.commodity)));
 // END
 }
 void  province_economy_overview_price_entry_t::set_alternate(bool alt) noexcept {

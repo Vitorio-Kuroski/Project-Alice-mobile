@@ -1,10 +1,12 @@
 #include "gui_tooltips.hpp"
-
 #include "system_state.hpp"
 #include "text.hpp"
 #include "labour_details.hpp"
 #include "economy_production.hpp"
 #include "construction.hpp"
+#include "logistics.hpp"
+#include "culture_constants.hpp"
+#include "trade_network.hpp"
 
 namespace ui {
 
@@ -211,7 +213,7 @@ void province_building_effect_tooltip(sys::state& state, text::columnar_layout& 
 		text::add_to_layout_box(state, contents, box, text::produce_simple_string(state, "alice_trade_attractiveness"), text::text_color::white);
 		text::add_to_layout_box(state, contents, box, std::string_view{ ":" }, text::text_color::white);
 		text::add_space_to_layout_box(state, contents, box);
-		text::add_to_layout_box(state, contents, box, text::fp_percentage{ nations::naval_base_level_to_market_attractiveness * level }, text::text_color::green);
+		text::add_to_layout_box(state, contents, box, text::fp_percentage{ trade_network::naval_base_level_to_market_attractiveness * level }, text::text_color::green);
 		text::close_layout_box(contents, box);
 	} else if(bt == economy::province_building_type::railroad) {
 		auto box = text::open_layout_box(contents, 0);
@@ -291,7 +293,7 @@ void province_building_construction_tooltip(sys::state& state, text::columnar_la
 	text::add_line(state, contents, "alice_construction_cost");
 
 	// Construction cost goods breakdown
-	float factor = economy::build_cost_multiplier(state, p, false);
+	float factor = economy::location_build_cost_multiplier(state, p, false);
 	auto constr_cost = state.economy_definitions.building_definitions[uint8_t(bt)].cost;
 
 	for(uint32_t i = 0; i < economy::commodity_set::set_size; ++i) {
@@ -385,5 +387,7 @@ void province_owner_rgo_commodity_tooltip(sys::state& state, text::columnar_layo
 		}
 	}
 };
+
+
 
 }

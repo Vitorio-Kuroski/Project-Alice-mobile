@@ -8,6 +8,7 @@
 #include "economy_constants.hpp"
 #include "economy_templates_pure.hpp"
 #include "economy_pops_constants.hpp"
+#include "demographics_templates.hpp"
 
 namespace economy {
 namespace pops {
@@ -168,17 +169,39 @@ auto prepare_pop_budget_templated(
 		adaptive_ve::max<VALUE>(0.f, savings - total_cost_needs) / total_cost_needs
 	);
 
-	VALUE base_life_costs = (0.00001f + life_costs * pop_size / state.defines.alice_needs_scaling_factor);
-	VALUE is_poor = adaptive_ve::max<VALUE>(0.01f, 1.f - 4.f * savings / base_life_costs);
+	VALUE base_life_costs = (economy::price_properties::commodity::min + life_costs * pop_size / state.defines.alice_needs_scaling_factor);
+	VALUE base_everyday_costs = (economy::price_properties::commodity::min + everyday_costs * pop_size / state.defines.alice_needs_scaling_factor);
+	VALUE base_luxury_costs = (economy::price_properties::commodity::min + luxury_costs * pop_size / state.defines.alice_needs_scaling_factor);
+
+	VALUE is_poor = adaptive_ve::max<VALUE>(0.01f, 1.f - savings / base_life_costs);
 	//VALUE current_life = pop_demographics::get_life_needs(state, ids);
 	is_poor = adaptive_ve::min<VALUE>(1.f, adaptive_ve::max<VALUE>(0.f, is_poor));
 
+	VALUE savings_positive = (savings + economy::price_properties::commodity::min);
+	VALUE savings_divisor = 1.f / savings_positive;
+
 	// prepare desired spending rate for every category
 
-	VALUE life_spending_ratio = state.defines.alice_needs_lf_spend * (1.f - is_poor) + is_poor;
+	VALUE life_satisfaction_per_pound = 1.f / (life_costs + economy::price_properties::commodity::min);
+	VALUE everyday_satisfaction_per_pound = 1.f / (everyday_costs + economy::price_properties::commodity::min);
+	VALUE luxury_satisfaction_per_pound = 1.f / (luxury_costs + economy::price_properties::commodity::min);
+
+
+	VALUE life_satisfaction_priority= adaptive_ve::max<VALUE>(0.f, life_satisfaction_per_pound * savings_positive - 0.01f);
+	VALUE everyday_satisfaction_priority = adaptive_ve::max<VALUE>(0.f, everyday_satisfaction_per_pound * savings_positive - 0.01f);
+	VALUE luxury_satisfaction_priority = adaptive_ve::max<VALUE>(0.f, luxury_satisfaction_per_pound * savings_positive - 0.01f);
+
+	VALUE total_score = life_satisfaction_priority + everyday_satisfaction_priority + luxury_satisfaction_priority + 0.01f;
+
+	VALUE lf_spend = adaptive_ve::min<VALUE>(10.f * base_life_costs * savings_divisor, life_satisfaction_priority / total_score);
+	VALUE ev_spend = adaptive_ve::min<VALUE>(10.f * base_everyday_costs * savings_divisor, everyday_satisfaction_priority / total_score);
+	VALUE lx_spend = adaptive_ve::min<VALUE>(10.f * base_luxury_costs * savings_divisor, luxury_satisfaction_priority / total_score);
+
+	VALUE life_spending_ratio = lf_spend * (1.f - is_poor) + is_poor;
 	VALUE housing_spending_ratio = 0.3f;
-	VALUE everyday_spending_ratio = state.defines.alice_needs_ev_spend * (1.f - is_poor);
-	VALUE luxury_spending_ratio = state.defines.alice_needs_lx_spend * (1.f - is_poor);
+	VALUE everyday_spending_ratio = ev_spend * (1.f - is_poor);
+	VALUE luxury_spending_ratio = lx_spend * (1.f - is_poor);
+
 	VALUE categories_spending_ratio = 0.0f;
 	VALUE education_spending_ratio = (0.2f) * (1.f - is_poor);
 	VALUE investment_ratio = adaptive_ve::max<VALUE>(investment_rate<VALUE>(state, ids), 0.0f);
@@ -854,7 +877,7 @@ void update_income_artisans(sys::state& state) {
 }
 
 
-constexpr inline float national_elite_trade_weight_multiplier = 1000.f;
+constexpr inline float national_elite_trade_weight_multiplier = 100000.f;
 
 float estimate_local_trade_income(sys::state const& state, dcon::province_id pid, dcon::market_id mid, dcon::pop_type_id ptid, float size) {
 	auto sids = state.world.market_get_zone_from_local_market(mid);
@@ -871,7 +894,7 @@ float estimate_local_trade_income(sys::state const& state, dcon::province_id pid
 	}
 
 	auto balance = state.world.market_get_stockpile(mid, economy::money);
-	auto trade_dividents = balance > 0.f ? balance * trade_dividents_rate : 0.f;
+	auto trade_dividents = balance > 0.f ? balance * trade_dividends_rate : 0.f;
 
 	return size / total * trade_dividents;
 }
@@ -1021,7 +1044,7 @@ void update_income_non_labor(sys::state& state) {
 
 	constexpr float min_registered_token_size = 2.f;
 
-	constexpr float expected_share = trade_dividents_rate;
+	constexpr float expected_share = production_dividends_rate;
 
 	auto const artisan_def = state.culture_definitions.artisans;
 	auto artisan_key = demographics::to_key(state, artisan_def);
@@ -1234,7 +1257,7 @@ void update_income_non_labor(sys::state& state) {
 		{
 			auto candidates = ve::select(valid_market, nation_trade_tokens.get(nation), 0.f);
 			auto total_money = ve::select(valid_market, nation_trade_money.get(nation), 0.f);
-			auto income = ve::select((pop_type == capis_def) && candidates > min_registered_token_size && size > 0.f, total_money / candidates * size * national_elite_trade_weight_multiplier, 0.f);
+			auto income = ve::select((pop_type == capis_def) && candidates > min_registered_token_size * national_elite_trade_weight_multiplier && size > 0.f, total_money / candidates * size * national_elite_trade_weight_multiplier, 0.f);
 #ifndef NDEBUG
 			ve::apply([](float v) { assert(std::isfinite(v) && v >= 0); }, income);
 			from_market_national = income * expected_share;
@@ -1924,7 +1947,7 @@ float estimate_pop_spending_category(sys::state const& state, dcon::consumption_
 		state, market, cat, cid, pop, budget
 	);
 	auto actually_bought = state.world.market_get_actual_probability_to_buy(market, cid);
-	auto cost = economy::price(state, market, cid);
+	auto cost = state.world.market_get_price(market, cid);
 	return demand * actually_bought * cost;
 }
 
@@ -1952,7 +1975,7 @@ float estimate_pop_spending_life(sys::state const& state, dcon::pop_id pop, dcon
 		state, cid, pop, budget, mul, weight, invention_factor
 	);
 	auto actually_bought = state.world.market_get_actual_probability_to_buy(market, cid);
-	auto cost = economy::price(state, market, cid);
+	auto cost = state.world.market_get_price(market, cid);
 	return demand * actually_bought * cost;
 }
 
@@ -1980,7 +2003,7 @@ float estimate_pop_spending_everyday(sys::state const& state, dcon::pop_id pop, 
 		state, cid, pop, budget, mul, weight, invention_factor
 	);
 	auto actually_bought = state.world.market_get_actual_probability_to_buy(market, cid);
-	auto cost = economy::price(state, market, cid);
+	auto cost = state.world.market_get_price(market, cid);
 	return demand * actually_bought * cost;
 }
 
@@ -2008,7 +2031,7 @@ float estimate_pop_spending_luxury(sys::state const& state, dcon::pop_id pop, dc
 		state, cid, pop, budget, mul, weight, invention_factor
 	);
 	auto actually_bought = state.world.market_get_actual_probability_to_buy(market, cid);
-	auto cost = economy::price(state, market, cid);
+	auto cost = state.world.market_get_price(market, cid);
 	return demand * actually_bought * cost;
 }
 
