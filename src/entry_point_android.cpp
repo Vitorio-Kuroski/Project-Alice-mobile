@@ -255,7 +255,7 @@ std::string check_game_folder(std::string const& path) {
 	return "";
 }
 
-// --- cenario (mesma logica do entry_point_nix.cpp, so que sem mods) -----------
+// --- cenario e mods (mesma logica do launcher do desktop) ---------------------
 
 struct scenario_file {
 	native_string file_name;
@@ -271,9 +271,101 @@ void add_roots(simple_fs::file_system& fs) {
 	simple_fs::add_root(fs, alice_data_root);
 }
 
+// Mods: os .mod da pasta mod/ do Victoria 2. Os escolhidos no menu "Ajustes
+// do Android" ficam em $HOME/android_mods.txt (um nome por linha, escrito pela
+// AliceActivity) e valem a partir da proxima abertura. As dependencias entram
+// junto e a ordem segue a do launcher do desktop (launcher_main.hpp).
+std::vector<parsers::mod_file> mod_list;
+
+std::string mods_config_path() {
+	return std::string(getenv("HOME")) + "/android_mods.txt";
+}
+
+void add_mod_dependencies(parsers::mod_file& mod) {
+	for(auto& dep : mod.dependent_mods) {
+		for(auto& other : mod_list) {
+			if(!other.mod_selected && other.name_ == dep) {
+				other.mod_selected = true;
+				add_mod_dependencies(other);
+			}
+		}
+	}
+}
+
+bool mod_depends_on(parsers::mod_file const& a, parsers::mod_file const& b, std::vector<bool>& seen) {
+	for(auto& dep : a.dependent_mods) {
+		if(dep == b.name_)
+			return true;
+		for(size_t i = 0; i < mod_list.size(); ++i) {
+			if(!seen[i] && mod_list[i].name_ == dep) {
+				seen[i] = true;
+				if(mod_depends_on(mod_list[i], b, seen))
+					return true;
+			}
+		}
+	}
+	return false;
+}
+
+void load_mod_selection() {
+	mod_list.clear();
+	simple_fs::file_system fs;
+	simple_fs::add_root(fs, game_folder);
+	auto mod_dir = simple_fs::open_directory(simple_fs::get_root(fs), NATIVE("mod"));
+	parsers::error_handler err("");
+	for(auto& f : simple_fs::list_files(mod_dir, NATIVE(".mod"))) {
+		if(auto of = simple_fs::open_file(f); of) {
+			auto content = simple_fs::view_contents(*of);
+			parsers::token_generator gen(content.data, content.data + content.file_size);
+			mod_list.push_back(parsers::parse_mod_file(gen, err, parsers::mod_file_context{}));
+		}
+	}
+
+	auto chosen = read_text_file(mods_config_path());
+	if(chosen) {
+		size_t start = 0;
+		while(start < chosen->size()) {
+			size_t end = chosen->find('\n', start);
+			if(end == std::string::npos)
+				end = chosen->size();
+			std::string name = chosen->substr(start, end - start);
+			while(!name.empty() && (name.back() == '\r' || name.back() == ' '))
+				name.pop_back();
+			for(auto& mod : mod_list) {
+				if(!name.empty() && mod.name_ == name)
+					mod.mod_selected = true;
+			}
+			start = end + 1;
+		}
+	}
+	for(auto& mod : mod_list) {
+		if(mod.mod_selected)
+			add_mod_dependencies(mod);
+	}
+	// escolhidos primeiro, cada um depois do que ele depende
+	std::stable_sort(mod_list.begin(), mod_list.end(), [](parsers::mod_file const& a, parsers::mod_file const& b) {
+		if(a.mod_selected && b.mod_selected) {
+			std::vector<bool> seen(mod_list.size());
+			return mod_depends_on(b, a, seen);
+		}
+		if(a.mod_selected != b.mod_selected)
+			return a.mod_selected;
+		return a.name_ < b.name_;
+	});
+	for(auto& mod : mod_list) {
+		if(mod.mod_selected)
+			LAUNCHER_LOGI("mod: %s (%s)", mod.name_.c_str(), mod.path_.c_str());
+	}
+}
+
 native_string produce_mod_path() {
 	simple_fs::file_system dummy;
 	add_roots(dummy);
+	for(auto& mod : mod_list) {
+		if(!mod.mod_selected)
+			break;
+		mod.add_to_file_system(dummy);
+	}
 	return simple_fs::extract_state(dummy);
 }
 
@@ -322,6 +414,7 @@ bool build_scenario_file() {
 	auto const path = produce_mod_path();
 	simple_fs::file_system fs_root;
 	simple_fs::restore_state(fs_root, path);
+	auto const save_dir = simple_fs::get_mod_save_dir_name(fs_root); // saves de cada mod em pasta propria
 	parsers::error_handler err("");
 	auto root = get_root(fs_root);
 	auto common = open_directory(root, NATIVE("common"));
@@ -344,6 +437,7 @@ bool build_scenario_file() {
 		err.accumulated_errors.clear();
 		err.accumulated_warnings.clear();
 		auto scenario_state = std::make_unique<sys::state>();
+		scenario_state->mod_save_dir = save_dir;
 		simple_fs::restore_state(scenario_state->common_fs, path);
 		scenario_state->load_scenario_data(err, bookmark_context.bookmark_dates[date_index].date_);
 		if(err.fatal)
@@ -431,6 +525,7 @@ void run_loader() {
 	game_folder = folder;
 	LAUNCHER_LOGI("pasta do Victoria 2: %s", game_folder.c_str());
 
+	load_mod_selection();
 	add_roots(game_state.common_fs);
 	check_scenario_folder();
 	find_scenario_file();
@@ -492,6 +587,22 @@ void android_set_stats(char const* text) {
 	alice_android::call_activity("setStats", text ? text : "");
 }
 
+void android_open_settings() {
+	alice_android::call_activity("openSettings", "");
+}
+
+void android_haptic() {
+	alice_android::call_activity("haptic", "");
+}
+
+void android_request_text(char const* current) {
+	alice_android::call_activity("requestText", current ? current : "");
+}
+
+void android_ask_continue() {
+	alice_android::call_activity("offerContinue", "");
+}
+
 void android_launcher_update(sys::state& state) {
 	using namespace alice_android;
 	auto& win = *state.win_ptr;
@@ -529,6 +640,7 @@ void android_launcher_update(sys::state& state) {
 				start_game_threads(state);
 			android_start_game(state);
 			show_progress(""); // a janela de carregamento da abertura fecha com o jogo na tela
+			window::android_offer_continue(state);
 		}
 		break;
 	case load_status::working:
@@ -548,6 +660,33 @@ extern "C" JNIEXPORT void JNICALL Java_org_projectalice_mobile_AliceActivity_nat
 		alice_android::picked_folder = std::string(chars);
 	}
 	env->ReleaseStringUTFChars(path, chars);
+	alice_android::wake_main_loop();
+}
+
+// "Continuar" escolhido na pergunta da abertura
+extern "C" JNIEXPORT void JNICALL Java_org_projectalice_mobile_AliceActivity_nativeContinueGame(JNIEnv*, jclass) {
+	window::android_continue_game();
+	alice_android::wake_main_loop();
+}
+
+// janela de texto: o texto confirmado, ou nulo se foi cancelada
+extern "C" JNIEXPORT void JNICALL Java_org_projectalice_mobile_AliceActivity_nativeOnTextResult(JNIEnv* env, jclass, jstring text) {
+	if(!text) {
+		window::android_text_result(nullptr);
+	} else {
+		char const* chars = env->GetStringUTFChars(text, nullptr);
+		window::android_text_result(chars);
+		env->ReleaseStringUTFChars(text, chars);
+	}
+	alice_android::wake_main_loop();
+}
+
+// menu "Ajustes do Android": a AliceActivity manda cada ajuste salvo ao abrir e
+// cada mudanca (thread da interface do Java)
+extern "C" JNIEXPORT void JNICALL Java_org_projectalice_mobile_AliceActivity_nativeSetSetting(JNIEnv* env, jclass, jstring key, jint value) {
+	char const* chars = env->GetStringUTFChars(key, nullptr);
+	window::android_set_setting(chars, int32_t(value));
+	env->ReleaseStringUTFChars(key, chars);
 	alice_android::wake_main_loop();
 }
 

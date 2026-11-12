@@ -16,33 +16,36 @@ Versão de testes do **Project Alice para Android**: o motor de código aberto p
 4. Abra o app, toque em **Escolher pasta**, ative **Acesso a todos os arquivos**, volte ao app e escolha a pasta do jogo.
 5. Na primeira vez o app monta o cenário, o que pode levar vários minutos.
 
-**Já tem uma versão anterior instalada?** Esta versão não instala por cima dela: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.6 uma vez.
+**Já tem uma versão anterior instalada?** Esta versão não instala por cima dela: desinstale a anterior antes. Desinstalar apaga os saves e as configurações; para guardar os saves, copie antes a pasta `Android/data/org.projectalice.mobile/files/.local/share/Alice/` pelo cabo USB e devolva-a depois de abrir a v0.7 uma vez.
 
 ## Controles
 
 | Gesto | Equivale a |
 |---|---|
 | Toque rápido | Clique esquerdo |
-| Segurar parado por ~0,5 s | Clique direito |
+| Segurar parado por ~0,5 s e soltar | Clique direito (ordens de movimento etc.) |
+| Segurar ~0,5 s e arrastar no mapa | Caixa de seleção (várias tropas) |
 | Arrastar sobre a interface | Arrastar com o botão esquerdo |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom |
-| Toque com três dedos | Mostra ou esconde o contador de desempenho (FPS) |
+| Toque com três dedos | Abre os **Ajustes do Android**: contador de desempenho, resolução do desenho, limite de FPS, vibração, mods |
 | Voltar | ESC (menu) |
+
+Para digitar (nome de save, chat), toque no campo de texto do jogo: abre o teclado do Android.
 
 Mouse e teclado físicos também funcionam.
 
 ## Novidades desta versão
 
-- **Janela "Carregando" durante toda a abertura:** na primeira vez, montar o cenário leva vários minutos. Antes, o aviso sumia em segundos e a tela ficava azul e vazia, parecendo travada. Agora a janela fica aberta até o jogo aparecer e mostra a etapa atual (preparar os arquivos, montar o cenário, carregar, iniciar).
-- A janela de carregamento não traz mais a barra de navegação do Android de volta por cima do jogo.
-- Continua com tudo da v0.5: resposta mais rápida ao toque com o jogo rodando e contador de desempenho (toque com três dedos).
+- **Ajustes do Android** (toque com três dedos): contador de desempenho, resolução do desenho (50%, 60%, 75% ou 100%), limite de 30 FPS, vibração e mods.
+- **Toque mais rápido:** a parte que lê o toque e desenha a tela fica nos núcleos rápidos do processador, e um deles sobra livre da simulação.
+- **Selecionar várias tropas:** segure ~0,5 s e arraste no mapa para desenhar a caixa de seleção. Segurar e soltar continua sendo o clique direito, agora ao soltar o dedo, com uma vibração curta para confirmar.
+- **Digitar texto:** tocar num campo de texto do jogo (nome de save, chat) abre o teclado do Android.
+- **Continuar:** ao abrir o jogo, o app oferece continuar a partida salva automaticamente quando você saiu.
+- **Mods:** escolha os mods da pasta `mod` do Victoria 2 nos Ajustes do Android. Valem na próxima abertura; na primeira vez com uma combinação nova, o cenário é montado de novo.
 
 ## Limitações conhecidas
 
-- Sem seleção de mods; só o jogo base.
-- Não é possível digitar texto (nome de save, chat).
-- Seleção em caixa de várias unidades com o dedo ainda não existe.
 - Entrar na partida leva alguns segundos num celular intermediário.
 
 ## Problemas?

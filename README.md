@@ -29,12 +29,15 @@ Versão para Android do [Project Alice](https://github.com/schombert/Project-Ali
 | Gesto | Equivale a |
 |---|---|
 | Toque rápido | Clique esquerdo |
-| Segurar parado por ~0,5 s | Clique direito |
+| Segurar parado por ~0,5 s e soltar | Clique direito (ordens de movimento etc.) |
+| Segurar ~0,5 s e arrastar no mapa | Caixa de seleção (várias tropas) |
 | Arrastar sobre a interface | Arrastar com o botão esquerdo |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom |
-| Toque com três dedos | Mostra ou esconde o contador de desempenho (FPS) |
+| Toque com três dedos | Abre os **Ajustes do Android**: contador de desempenho, resolução do desenho, limite de FPS, vibração, mods |
 | Voltar | ESC (menu) |
+
+Para digitar (nome de save, chat), toque no campo de texto do jogo: abre o teclado do Android.
 
 Mouse e teclado físicos também funcionam.
 

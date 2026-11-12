@@ -1,13 +1,23 @@
 package org.projectalice.mobile;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import android.app.AlertDialog;
 import android.app.NativeActivity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.graphics.Typeface;
@@ -17,6 +27,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.ProgressBar;
@@ -42,6 +53,9 @@ public class AliceActivity extends NativeActivity {
 	}
 
 	private static native void nativeOnGameFolderPicked(String path);
+	private static native void nativeSetSetting(String key, int value);
+	private static native void nativeOnTextResult(String text);
+	private static native void nativeContinueGame();
 
 	private boolean waitingForAllFilesAccess = false;
 	private AlertDialog folderDialog = null;
@@ -49,6 +63,8 @@ public class AliceActivity extends NativeActivity {
 	private final Handler uiHandler = new Handler(Looper.getMainLooper());
 	private AlertDialog loadingDialog = null;
 	private PopupWindow statsPopup = null;
+	private SharedPreferences prefs = null;
+	private boolean perfCounterOn = false;
 	private TextView statsText = null;
 	private Runnable pendingLoadingDialog = null;
 	private TextView loadingText = null;
@@ -58,6 +74,187 @@ public class AliceActivity extends NativeActivity {
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		hideSystemBars();
+		prefs = getSharedPreferences("alice_android", MODE_PRIVATE);
+		nativeSetSetting("render_scale", renderScale());
+		nativeSetSetting("fps_limit", fpsLimit());
+	}
+
+	// --- menu "Ajustes do Android" (toque com tres dedos) ----------------------
+
+	private static final int[] RENDER_SCALES = { 50, 60, 75, 100 };
+
+	private int renderScale() {
+		return prefs.getInt("render_scale", 75);
+	}
+
+	private int fpsLimit() {
+		return prefs.getInt("fps_limit", 60);
+	}
+
+	private boolean hapticOn() {
+		return prefs.getBoolean("haptic", true);
+	}
+
+	/** Chamado pelo C++ quando o toque longo e reconhecido. */
+	public void haptic(final String unused) {
+		if(!hapticOn())
+			return;
+		Vibrator vibrator = getSystemService(Vibrator.class);
+		if(vibrator != null && vibrator.hasVibrator())
+			vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK));
+	}
+
+	/** Chamado pelo C++ no toque com tres dedos. */
+	public void openSettings(final String unused) {
+		runOnUiThread(this::showSettingsDialog);
+	}
+
+	private void showSettingsDialog() {
+		if(isFinishing())
+			return;
+		String[] items = {
+			"Contador de desempenho: " + (perfCounterOn ? "ligado" : "desligado"),
+			"Resolução do desenho: " + renderScale() + "%",
+			"Limite de quadros: " + fpsLimit() + " FPS",
+			"Vibrar no toque longo: " + (hapticOn() ? "sim" : "não"),
+			"Mods: " + (chosenMods().isEmpty() ? "nenhum (jogo base)" : chosenMods().size() + " escolhido(s)")
+		};
+		AlertDialog dialog = new AlertDialog.Builder(this)
+			.setTitle("Ajustes do Android")
+			.setItems(items, (d, which) -> {
+				switch(which) {
+				case 0:
+					perfCounterOn = !perfCounterOn;
+					nativeSetSetting("perf_counter", perfCounterOn ? 1 : 0);
+					break;
+				case 1:
+					showRenderScaleDialog();
+					return;
+				case 2:
+					int fps = fpsLimit() == 60 ? 30 : 60;
+					prefs.edit().putInt("fps_limit", fps).apply();
+					nativeSetSetting("fps_limit", fps);
+					break;
+				case 3:
+					prefs.edit().putBoolean("haptic", !hapticOn()).apply();
+					break;
+				case 4:
+					showModsDialog();
+					return;
+				}
+				showSettingsDialog(); // mostra o valor novo
+			})
+			.setNegativeButton("Fechar", null)
+			.create();
+		showWithoutSystemBars(dialog);
+	}
+
+	// --- mods ---------------------------------------------------------------
+	// Os .mod ficam na pasta mod/ do Victoria 2. Os nomes escolhidos vao para
+	// android_mods.txt (lido pelo C++ ao abrir o app). Latin-1 dos dois lados:
+	// o C++ compara os bytes do nome como estao no .mod.
+
+	private static final Pattern MOD_NAME = Pattern.compile("(?m)^\\s*name\\s*=\\s*\"?([^\"\\r\\n]*)\"?");
+
+	private File modsConfigFile() {
+		return new File(getExternalFilesDir(null), "android_mods.txt");
+	}
+
+	private List<String> chosenMods() {
+		List<String> out = new ArrayList<>();
+		try {
+			for(String line : Files.readAllLines(modsConfigFile().toPath(), StandardCharsets.ISO_8859_1)) {
+				if(!line.trim().isEmpty())
+					out.add(line.trim());
+			}
+		} catch(Exception e) {
+			// sem arquivo: nenhum mod
+		}
+		return out;
+	}
+
+	private List<String> availableMods() {
+		List<String> names = new ArrayList<>();
+		try {
+			File folderFile = new File(getExternalFilesDir(null), "game_folder.txt");
+			String folder = new String(Files.readAllBytes(folderFile.toPath()), StandardCharsets.UTF_8).trim();
+			File[] files = new File(folder, "mod").listFiles((dir, name) -> name.toLowerCase().endsWith(".mod"));
+			if(files == null)
+				return names;
+			for(File f : files) {
+				String text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.ISO_8859_1);
+				Matcher m = MOD_NAME.matcher(text);
+				if(m.find() && !m.group(1).trim().isEmpty() && !names.contains(m.group(1).trim()))
+					names.add(m.group(1).trim());
+			}
+		} catch(Exception e) {
+			// sem pasta do jogo ainda
+		}
+		names.sort(String.CASE_INSENSITIVE_ORDER);
+		return names;
+	}
+
+	private void showModsDialog() {
+		List<String> mods = availableMods();
+		if(mods.isEmpty()) {
+			AlertDialog dialog = new AlertDialog.Builder(this)
+				.setTitle("Mods")
+				.setMessage("Nenhum mod encontrado na pasta mod do Victoria 2. Copie os mods (o arquivo .mod e a pasta dele) para lá.")
+				.setPositiveButton("OK", (d, w) -> showSettingsDialog())
+				.create();
+			showWithoutSystemBars(dialog);
+			return;
+		}
+		List<String> chosen = chosenMods();
+		String[] labels = mods.toArray(new String[0]);
+		boolean[] checked = new boolean[labels.length];
+		for(int i = 0; i < labels.length; ++i)
+			checked[i] = chosen.contains(labels[i]);
+		AlertDialog dialog = new AlertDialog.Builder(this)
+			.setTitle("Mods")
+			.setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
+			.setPositiveButton("Salvar", (d, w) -> {
+				StringBuilder sb = new StringBuilder();
+				for(int i = 0; i < labels.length; ++i) {
+					if(checked[i])
+						sb.append(labels[i]).append('\n');
+				}
+				try {
+					Files.write(modsConfigFile().toPath(), sb.toString().getBytes(StandardCharsets.ISO_8859_1));
+				} catch(Exception e) {
+					Toast.makeText(this, "Não foi possível salvar a escolha de mods.", Toast.LENGTH_LONG).show();
+					return;
+				}
+				AlertDialog info = new AlertDialog.Builder(this)
+					.setTitle("Mods")
+					.setMessage("Os mods valem a partir da próxima vez que o app abrir. Feche o app e abra de novo. Na primeira vez com essa combinação de mods o cenário é montado de novo, o que leva alguns minutos. Mods dos quais um escolhido depende entram junto.")
+					.setPositiveButton("OK", null)
+					.create();
+				showWithoutSystemBars(info);
+			})
+			.setNegativeButton("Voltar", (d, w) -> showSettingsDialog())
+			.create();
+		showWithoutSystemBars(dialog);
+	}
+
+	private void showRenderScaleDialog() {
+		String[] labels = { "50% (mais rápido)", "60%", "75% (padrão)", "100% (mais nítido)" };
+		int current = 2;
+		for(int i = 0; i < RENDER_SCALES.length; ++i) {
+			if(RENDER_SCALES[i] == renderScale())
+				current = i;
+		}
+		AlertDialog dialog = new AlertDialog.Builder(this)
+			.setTitle("Resolução do desenho")
+			.setSingleChoiceItems(labels, current, (d, which) -> {
+				prefs.edit().putInt("render_scale", RENDER_SCALES[which]).apply();
+				nativeSetSetting("render_scale", RENDER_SCALES[which]);
+				d.dismiss();
+				showSettingsDialog();
+			})
+			.setNegativeButton("Voltar", (d, which) -> showSettingsDialog())
+			.create();
+		showWithoutSystemBars(dialog);
 	}
 
 	// O sistema mostra as barras de novo em varias situacoes (dialogos,
@@ -165,12 +362,16 @@ public class AliceActivity extends NativeActivity {
 			.setCancelable(false)
 			.create();
 		loadingDialog.setCanceledOnTouchOutside(false);
-		// Uma janela de dialogo nova traz as barras do sistema de volta. Aberta
-		// sem foco, ja com as barras escondidas, e so depois recebe o foco.
-		Window window = loadingDialog.getWindow();
+		showWithoutSystemBars(loadingDialog);
+	}
+
+	// Uma janela de dialogo nova traz as barras do sistema de volta. Aberta sem
+	// foco, ja com as barras escondidas, e so depois recebe o foco.
+	private void showWithoutSystemBars(AlertDialog dialog) {
+		Window window = dialog.getWindow();
 		if(window != null)
 			window.setFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
-		loadingDialog.show();
+		dialog.show();
 		if(window != null) {
 			WindowInsetsController controller = window.getInsetsController();
 			if(controller != null) {
@@ -214,6 +415,65 @@ public class AliceActivity extends NativeActivity {
 				return;
 			}
 			statsText.setText(text);
+		});
+	}
+
+	/**
+	 * Campo de texto do jogo com foco: a NativeActivity nao recebe os
+	 * caracteres do teclado virtual, entao o texto e digitado aqui e enviado
+	 * ao C++, que substitui o conteudo do campo. Cancelar devolve nulo.
+	 */
+	public void requestText(final String current) {
+		runOnUiThread(() -> {
+			if(isFinishing()) {
+				nativeOnTextResult(null);
+				return;
+			}
+			int padding = (int)(20 * getResources().getDisplayMetrics().density);
+			EditText input = new EditText(this);
+			input.setSingleLine(true);
+			input.setText(current);
+			input.selectAll();
+			LinearLayout layout = new LinearLayout(this);
+			layout.setPadding(padding, padding / 2, padding, 0);
+			layout.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+			final boolean[] answered = { false };
+			AlertDialog dialog = new AlertDialog.Builder(this)
+				.setTitle("Digitar texto")
+				.setView(layout)
+				.setPositiveButton("OK", (d, which) -> {
+					answered[0] = true;
+					nativeOnTextResult(input.getText().toString());
+				})
+				.setNegativeButton("Cancelar", null)
+				.create();
+			dialog.setOnDismissListener(d -> {
+				if(!answered[0])
+					nativeOnTextResult(null);
+			});
+			Window window = dialog.getWindow();
+			if(window != null)
+				window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+			showWithoutSystemBars(dialog);
+			input.requestFocus();
+		});
+	}
+
+	/**
+	 * Chamado pelo C++ ao abrir o jogo quando ha um salvamento automatico
+	 * (feito ao sair do app no meio da partida).
+	 */
+	public void offerContinue(final String unused) {
+		runOnUiThread(() -> {
+			if(isFinishing())
+				return;
+			AlertDialog dialog = new AlertDialog.Builder(this)
+				.setTitle("Continuar a partida?")
+				.setMessage("Há uma partida salva automaticamente quando você saiu do app.")
+				.setPositiveButton("Continuar", (d, which) -> nativeContinueGame())
+				.setNegativeButton("Agora não", null)
+				.create();
+			showWithoutSystemBars(dialog);
 		});
 	}
 

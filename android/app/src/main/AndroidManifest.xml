@@ -4,6 +4,8 @@
     <!-- ler a pasta do Victoria 2 escolhida pelo usuario por caminho de arquivo
          (o C++ usa open/mmap); o usuario concede em Configuracoes -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- vibracao curta ao reconhecer o toque longo -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- multiplayer -->
     <uses-permission android:name="android.permission.INTERNET" />
 

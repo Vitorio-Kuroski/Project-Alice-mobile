@@ -17,7 +17,8 @@
 //
 // Toque -> eventos de mouse do jogo (ver a secao "entrada" abaixo):
 //   toque rapido                -> clique esquerdo
-//   segurar parado (~0,5 s)     -> clique direito (ordens de movimento etc.)
+//   segurar parado (~0,5 s)     -> clique direito ao soltar (ordens de movimento etc.)
+//   segurar e depois arrastar   -> caixa de selecao no mapa (arrasto esquerdo)
 //   arrastar sobre a interface  -> arrasto com o botao esquerdo (barras, janelas)
 //   arrastar sobre o mapa       -> arrasto com o botao do meio (move o mapa)
 //   dois dedos                  -> pinca = zoom (roda do mouse), mover = arrasta o mapa
@@ -36,6 +37,8 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl32.h>
+#include <dirent.h>
+#include <sched.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
@@ -43,6 +46,8 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <mutex>
+#include <optional>
 
 #define ALICE_LOGI(...) __android_log_print(ANDROID_LOG_INFO, "Alice", __VA_ARGS__)
 #define ALICE_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "Alice", __VA_ARGS__)
@@ -99,6 +104,152 @@ namespace {
 // pixels desenhados / pixels da tela: converte as coordenadas do toque e do
 // mouse (sempre em pixels da tela) para as do jogo
 float g_input_scale = 1.f;
+
+// 1 = um quadro por atualizacao da tela (60 FPS); 2 = um a cada duas (30 FPS)
+int32_t g_swap_interval = 1;
+
+// Ajustes do menu "Ajustes do Android" (AliceActivity). Chegam pela thread da
+// interface do Java e sao aplicados pela thread de desenho, no loop.
+std::atomic<int32_t> pending_render_scale{ 0 }; // porcentagem; 0 = nada novo
+std::atomic<int32_t> pending_fps_limit{ 0 };    // 0 = nada novo
+std::atomic<int32_t> pending_perf_counter{ -1 }; // -1 = nada novo
+
+// ---------------------------------------------------------------------------
+// nucleos do processador
+// ---------------------------------------------------------------------------
+//
+// Celulares misturam nucleos rapidos e lentos (no Snapdragon 675: 2 rapidos e
+// 6 lentos), e sem orientacao o Android pode deixar a thread que le o toque e
+// desenha num nucleo lento enquanto a simulacao ocupa os rapidos. Com o jogo
+// na tela:
+//  - a thread de desenho fica so nos nucleos rapidos;
+//  - todas as outras threads do app (simulacao, workers do TBB, som...) ficam
+//    fora de um dos nucleos rapidos, que sobra livre para o desenho.
+// Sem saber a frequencia de todos os nucleos, ou com menos de 4, nada muda.
+// O Android desfaz a afinidade quando o app troca de grupo (segundo plano e
+// volta), e threads novas herdam a de quem as cria: por isso ela e aplicada de
+// novo ao voltar ao primeiro plano e a cada poucos segundos.
+
+struct cpu_layout {
+	bool detected = false;
+	bool pin_render = false;          // desenho preso aos nucleos rapidos
+	bool restrict_simulation = false; // demais threads fora de um nucleo
+	cpu_set_t render;
+	cpu_set_t simulation;
+	std::string description;          // para o contador de desempenho
+	std::chrono::steady_clock::time_point last_apply;
+	bool apply_now = false;
+};
+cpu_layout cpus;
+
+int64_t cpu_max_freq_khz(int32_t cpu) {
+	char path[96];
+	snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", int(cpu));
+	FILE* f = fopen(path, "r");
+	if(!f)
+		return -1;
+	long long value = -1;
+	if(fscanf(f, "%lld", &value) != 1)
+		value = -1;
+	fclose(f);
+	return value;
+}
+
+std::string describe_cpu_set(cpu_set_t const& set, int32_t count) {
+	// "0-5,7"
+	std::string out;
+	for(int32_t i = 0; i < count; ++i) {
+		if(!CPU_ISSET(i, &set))
+			continue;
+		int32_t j = i;
+		while(j + 1 < count && CPU_ISSET(j + 1, &set))
+			++j;
+		if(!out.empty())
+			out += ',';
+		out += std::to_string(i);
+		if(j > i)
+			out += '-' + std::to_string(j);
+		i = j;
+	}
+	return out;
+}
+
+void detect_cpu_layout() {
+	cpus.detected = true;
+	int32_t const count = std::min(int32_t(sysconf(_SC_NPROCESSORS_CONF)), int32_t(CPU_SETSIZE));
+	std::vector<int64_t> freq(std::max(count, 0));
+	for(int32_t i = 0; i < count; ++i) {
+		freq[i] = cpu_max_freq_khz(i);
+		if(freq[i] <= 0) {
+			ALICE_LOGI("nucleos: frequencia do cpu%d desconhecida, afinidade nao muda", int(i));
+			return;
+		}
+	}
+	if(count < 4) {
+		ALICE_LOGI("nucleos: so %d, afinidade nao muda", int(count));
+		return;
+	}
+
+	int64_t const top = *std::max_element(freq.begin(), freq.end());
+	int64_t second = 0;
+	for(auto f : freq) {
+		if(f < top)
+			second = std::max(second, f);
+	}
+	int32_t top_count = 0;
+	for(auto f : freq)
+		top_count += f == top ? 1 : 0;
+	// com um unico nucleo "primo" o desenho tambem pode usar o grupo seguinte
+	int64_t const fast_min = (top_count == 1 && second > 0) ? second : top;
+
+	CPU_ZERO(&cpus.render);
+	CPU_ZERO(&cpus.simulation);
+	int32_t reserved = -1;
+	int32_t fast_count = 0;
+	for(int32_t i = 0; i < count; ++i) {
+		CPU_SET(i, &cpus.simulation);
+		if(freq[i] >= fast_min) {
+			CPU_SET(i, &cpus.render);
+			++fast_count;
+		}
+		if(freq[i] == top)
+			reserved = i; // o rapido de numero mais alto
+	}
+	CPU_CLR(reserved, &cpus.simulation);
+	cpus.restrict_simulation = true;
+	cpus.pin_render = fast_count < count; // todos iguais: so sobra um livre
+	cpus.description = "desenho " + (cpus.pin_render ? describe_cpu_set(cpus.render, count) : std::string("todos"))
+		+ ", simulacao " + describe_cpu_set(cpus.simulation, count);
+	ALICE_LOGI("nucleos: %s (max %lld kHz, %d rapidos de %d)", cpus.description.c_str(), (long long)top, int(fast_count), int(count));
+}
+
+// Chamada na thread de desenho.
+void apply_cpu_affinity() {
+	cpus.last_apply = std::chrono::steady_clock::now();
+	cpus.apply_now = false;
+	pid_t const self = gettid();
+	if(cpus.restrict_simulation) {
+		if(DIR* dir = opendir("/proc/self/task")) {
+			while(dirent* entry = readdir(dir)) {
+				pid_t const tid = pid_t(atoi(entry->d_name));
+				if(tid <= 0 || tid == self)
+					continue;
+				// ESRCH: a thread terminou; EINVAL: fora do grupo de nucleos do app
+				sched_setaffinity(tid, sizeof(cpu_set_t), &cpus.simulation);
+			}
+			closedir(dir);
+		}
+	}
+	if(cpus.pin_render && sched_setaffinity(0, sizeof(cpu_set_t), &cpus.render) != 0)
+		ALICE_LOGE("nucleos: nao foi possivel prender o desenho (errno %d)", errno);
+}
+
+void update_cpu_affinity(window_data_impl const& win) {
+	if(!cpus.restrict_simulation || !win.game_started)
+		return;
+	if(cpus.apply_now || std::chrono::steady_clock::now() - cpus.last_apply > std::chrono::seconds(5))
+		apply_cpu_affinity();
+}
 
 // Define o tamanho dos buffers da janela pela render_scale. O hardware de
 // composicao do Android amplia a imagem para a tela inteira.
@@ -205,7 +356,7 @@ bool create_egl_surface(window_data_impl& win, ANativeWindow* native_window) {
 		ALICE_LOGE("eglMakeCurrent falhou (0x%x)", eglGetError());
 		return false;
 	}
-	eglSwapInterval(win.egl_display, 1); // vsync, como o glfwSwapInterval(1) do desktop
+	eglSwapInterval(win.egl_display, g_swap_interval); // vsync (1, como o glfwSwapInterval(1) do desktop) ou 30 FPS
 	return true;
 }
 
@@ -302,6 +453,22 @@ void pause_and_save_on_background(sys::state& state) {
 	command::save_game(state, state.local_player_nation, false, background_save_name);
 }
 
+// "Continuar": a AliceActivity pergunta ao abrir o jogo se ha um salvamento
+// automatico; a resposta chega pela thread do Java e e aplicada no loop.
+std::atomic<bool> continue_requested{ false };
+
+void update_continue(sys::state& state) {
+	if(!continue_requested.exchange(false))
+		return;
+	if(!state.win_ptr->game_started || state.network_mode != sys::network_mode_type::single_player)
+		return;
+	ALICE_LOGI("continuando a partida de %s", background_save_name);
+	// o mesmo que escolher o save na lista e depois "Iniciar": os dois comandos
+	// rodam em ordem na thread do jogo
+	command::load_save_game(state, background_save_name, false);
+	command::notify_start_game(state);
+}
+
 void handle_cmd(android_app* app, int32_t cmd) {
 	auto& state = *static_cast<sys::state*>(app->userData);
 	auto& win = *state.win_ptr;
@@ -323,6 +490,7 @@ void handle_cmd(android_app* app, int32_t cmd) {
 		break;
 	case APP_CMD_GAINED_FOCUS:
 		win.has_focus = true;
+		cpus.apply_now = true;
 		if(win.game_started && state.user_settings.mute_on_focus_lost)
 			sound::resume_all(state);
 		break;
@@ -334,6 +502,7 @@ void handle_cmd(android_app* app, int32_t cmd) {
 	case APP_CMD_RESUME:
 		ALICE_LOGI("APP_CMD_RESUME");
 		win.resumed = true;
+		cpus.apply_now = true;
 		break;
 	case APP_CMD_PAUSE:
 		ALICE_LOGI("APP_CMD_PAUSE");
@@ -365,6 +534,8 @@ struct touch_tracker {
 		pending,         // dedo encostou; ainda nao se sabe se e toque, segurar ou arrasto
 		left_drag,       // arrasto na interface (botao esquerdo)
 		map_pan,         // arrasto no mapa (botao do meio)
+		held,            // segurou parado: clique direito ao soltar, ou caixa se arrastar
+		box_select,      // segurou e arrastou no mapa: caixa de selecao (botao esquerdo)
 		pinch,           // dois dedos
 		ignore_until_up  // gesto ja consumido; espera todos os dedos sairem
 	};
@@ -505,7 +676,7 @@ void pinch_geometry(AInputEvent const* event, float& mid_x, float& mid_y, float&
 void end_single_finger_gesture(sys::state& state) {
 	auto const x = int32_t(touch.last_x), y = int32_t(touch.last_y);
 	auto const mod = sys::key_modifiers::modifiers_none;
-	if(touch.current == touch_tracker::mode::left_drag)
+	if(touch.current == touch_tracker::mode::left_drag || touch.current == touch_tracker::mode::box_select)
 		game_lbutton(state, x, y, false, mod);
 	else if(touch.current == touch_tracker::mode::map_pan || touch.current == touch_tracker::mode::pinch)
 		game_mbutton(state, x, y, false, mod);
@@ -531,8 +702,10 @@ struct perf_counter {
 };
 perf_counter perf;
 
-void toggle_perf_counter() {
-	perf.visible = !perf.visible;
+void set_perf_counter(bool visible) {
+	if(perf.visible == visible)
+		return;
+	perf.visible = visible;
 	perf.frames = 0;
 	perf.worst_ms = 0.f;
 	perf.window_start = perf.last_frame = std::chrono::steady_clock::now();
@@ -565,15 +738,137 @@ void update_perf_counter(sys::state& state) {
 	char speed_text[24] = "pausado";
 	if(speed > 0)
 		snprintf(speed_text, sizeof(speed_text), "velocidade %d", int(speed));
-	char text[128];
-	snprintf(text, sizeof(text), "FPS %.0f  quadro %.0f ms (pior %.0f)\n%s  dias/s %.1f",
+	char text[256];
+	snprintf(text, sizeof(text), "FPS %.0f  quadro %.0f ms (pior %.0f)\n%s  dias/s %.1f\nnucleos: %s",
 		float(perf.frames) * 1000.f / elapsed_ms, elapsed_ms / float(perf.frames), perf.worst_ms,
-		speed_text, float(date - perf.start_date) * 1000.f / elapsed_ms);
+		speed_text, float(date - perf.start_date) * 1000.f / elapsed_ms,
+		cpus.restrict_simulation ? cpus.description.c_str() : "padrao do Android");
 	android_set_stats(text);
 	perf.window_start = now;
 	perf.frames = 0;
 	perf.worst_ms = 0.f;
 	perf.start_date = date;
+}
+
+// Aplica o que mudou no menu de ajustes. Na thread de desenho (contexto EGL).
+void apply_pending_settings(sys::state& state) {
+	auto& win = *state.win_ptr;
+	if(int32_t const percent = pending_render_scale.exchange(0); percent > 0) {
+		win.render_scale = float(std::clamp(percent, 25, 100)) / 100.f;
+		update_window_size(state); // mede a tela e chama o on_resize do jogo
+	}
+	if(int32_t const fps = pending_fps_limit.exchange(0); fps > 0) {
+		g_swap_interval = fps <= 30 ? 2 : 1;
+		if(win.egl_surface != EGL_NO_SURFACE)
+			eglSwapInterval(win.egl_display, g_swap_interval);
+		ALICE_LOGI("limite de quadros: %d FPS (swap interval %d)", int(fps), int(g_swap_interval));
+	}
+	if(int32_t const perf_on = pending_perf_counter.exchange(-1); perf_on >= 0)
+		set_perf_counter(perf_on != 0);
+}
+
+// ---------------------------------------------------------------------------
+// digitar texto
+// ---------------------------------------------------------------------------
+//
+// A NativeActivity nao entrega os caracteres do teclado virtual. Quando um
+// campo de texto do jogo ganha foco (ou recebe um toque com o foco ja nele), a
+// AliceActivity abre uma janela com o texto atual e o teclado; o texto
+// confirmado substitui o do campo, pelo mesmo on_text do teclado no PC.
+
+std::mutex text_result_mutex;
+std::optional<std::string> text_result; // texto confirmado, ainda nao aplicado
+bool text_result_cancelled = false;
+bool text_dialog_open = false;
+ui::element_base* text_target = nullptr;     // campo para onde vai o texto
+ui::element_base* last_edit_target = nullptr; // para notar o foco mudando
+
+std::string utf16_to_utf8(std::u16string_view in) {
+	std::string out;
+	for(size_t i = 0; i < in.size(); ++i) {
+		uint32_t c = in[i];
+		if(c >= 0xD800 && c < 0xDC00 && i + 1 < in.size() && in[i + 1] >= 0xDC00 && in[i + 1] < 0xE000) {
+			c = 0x10000 + ((c - 0xD800) << 10) + (uint32_t(in[i + 1]) - 0xDC00);
+			++i;
+		}
+		if(c < 0x80) {
+			out += char(c);
+		} else if(c < 0x800) {
+			out += char(0xC0 | (c >> 6));
+			out += char(0x80 | (c & 0x3F));
+		} else if(c < 0x10000) {
+			out += char(0xE0 | (c >> 12));
+			out += char(0x80 | ((c >> 6) & 0x3F));
+			out += char(0x80 | (c & 0x3F));
+		} else {
+			out += char(0xF0 | (c >> 18));
+			out += char(0x80 | ((c >> 12) & 0x3F));
+			out += char(0x80 | ((c >> 6) & 0x3F));
+			out += char(0x80 | (c & 0x3F));
+		}
+	}
+	return out;
+}
+
+std::u32string utf8_to_utf32(std::string_view in) {
+	std::u32string out;
+	for(size_t i = 0; i < in.size();) {
+		uint8_t const b = uint8_t(in[i]);
+		int32_t extra = b < 0x80 ? 0 : (b >> 5) == 0x6 ? 1 : (b >> 4) == 0xE ? 2 : (b >> 3) == 0x1E ? 3 : -1;
+		if(extra < 0 || i + size_t(extra) >= in.size() + (extra == 0 ? 1 : 0)) {
+			++i; // byte invalido: pula
+			continue;
+		}
+		uint32_t c = extra == 0 ? b : extra == 1 ? (b & 0x1F) : extra == 2 ? (b & 0x0F) : (b & 0x07);
+		for(int32_t k = 1; k <= extra; ++k)
+			c = (c << 6) | (uint8_t(in[i + k]) & 0x3F);
+		out += char32_t(c);
+		i += size_t(extra) + 1;
+	}
+	return out;
+}
+
+void request_text_input(sys::state& state) {
+	auto* target = state.ui_state.edit_target_internal;
+	if(!target || text_dialog_open)
+		return;
+	text_dialog_open = true;
+	text_target = target;
+	android_request_text(utf16_to_utf8(target->text_content()).c_str());
+}
+
+// No loop da thread de desenho: abre a janela quando o foco chega a um campo
+// e aplica o texto confirmado.
+void update_text_input(sys::state& state) {
+	if(!state.win_ptr->game_started)
+		return;
+	auto* const target = state.ui_state.edit_target_internal;
+	if(target != last_edit_target) {
+		last_edit_target = target;
+		if(target)
+			request_text_input(state);
+	}
+
+	std::optional<std::string> entered;
+	{
+		std::lock_guard lock(text_result_mutex);
+		if(!text_result && !text_result_cancelled)
+			return;
+		entered.swap(text_result);
+		text_result_cancelled = false;
+	}
+	text_dialog_open = false;
+	// so se o campo ainda e o mesmo e continua com o foco
+	if(!entered || text_target != state.ui_state.edit_target_internal || !text_target)
+		return;
+	auto const text = utf8_to_utf32(*entered);
+	dispatch_to_game(state, [&] {
+		state.pass_edit_command(ui::edit_command::select_all, sys::key_modifiers::modifiers_none);
+		if(text.empty())
+			state.pass_edit_command(ui::edit_command::delete_selection, sys::key_modifiers::modifiers_none);
+		for(char32_t c : text)
+			state.on_text(c);
+	});
 }
 
 int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
@@ -596,7 +891,7 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 		if(AMotionEvent_getPointerCount(event) == 3 && touch.current != touch_tracker::mode::ignore_until_up) {
 			// terceiro dedo: desfaz a pinca que comecou com os dois primeiros
 			end_single_finger_gesture(state);
-			toggle_perf_counter();
+			android_open_settings();
 			touch.current = touch_tracker::mode::ignore_until_up;
 		} else if(AMotionEvent_getPointerCount(event) == 2 && touch.current != touch_tracker::mode::ignore_until_up) {
 			end_single_finger_gesture(state);
@@ -633,6 +928,13 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 		float const x = event_x(event, index);
 		float const y = event_y(event, index);
 
+		if(touch.current == touch_tracker::mode::held) {
+			if(std::hypot(x - touch.start_x, y - touch.start_y) < touch_slop_px(app) || touch_is_over_ui(state))
+				break; // na interface continua valendo o clique direito ao soltar
+			// segurou e arrastou no mapa: caixa de selecao a partir de onde encostou
+			game_lbutton(state, int32_t(touch.start_x), int32_t(touch.start_y), true, mod);
+			touch.current = touch_tracker::mode::box_select;
+		}
 		if(touch.current == touch_tracker::mode::pending) {
 			if(std::hypot(x - touch.start_x, y - touch.start_y) < touch_slop_px(app))
 				break;
@@ -646,7 +948,8 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 				touch.current = touch_tracker::mode::map_pan;
 			}
 		}
-		if(touch.current == touch_tracker::mode::left_drag || touch.current == touch_tracker::mode::map_pan) {
+		if(touch.current == touch_tracker::mode::left_drag || touch.current == touch_tracker::mode::map_pan
+			|| touch.current == touch_tracker::mode::box_select) {
 			touch.last_x = x;
 			touch.last_y = y;
 			game_mouse_move(state, int32_t(x), int32_t(y), mod);
@@ -666,9 +969,20 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 		if(touch.current == touch_tracker::mode::pending) {
 			// toque rapido = clique esquerdo onde o dedo encostou
 			auto const x = int32_t(touch.start_x), y = int32_t(touch.start_y);
+			auto* const focused_before = state.ui_state.edit_target_internal;
 			game_lbutton(state, x, y, true, mod);
 			game_lbutton(state, x, y, false, mod);
 			start_flash(touch_tracker::flash::tap);
+			// tocar de novo no campo que ja tinha o foco abre o teclado de novo
+			if(focused_before && focused_before == state.ui_state.edit_target_internal
+				&& state.ui_state.under_mouse == focused_before)
+				request_text_input(state);
+			touch.current = touch_tracker::mode::none;
+		} else if(touch.current == touch_tracker::mode::held) {
+			// segurou e soltou sem arrastar no mapa = clique direito onde encostou
+			auto const x = int32_t(touch.start_x), y = int32_t(touch.start_y);
+			game_rbutton(state, x, y, true, mod);
+			game_rbutton(state, x, y, false, mod);
 			touch.current = touch_tracker::mode::none;
 		} else {
 			end_single_finger_gesture(state);
@@ -685,17 +999,17 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 	return 1;
 }
 
-// Segurar parado nao gera evento, entao o clique direito e verificado a cada frame.
+// Segurar parado nao gera evento, entao o toque longo e verificado a cada
+// frame. Ele so marca o gesto: soltar da o clique direito, arrastar no mapa
+// desenha a caixa de selecao.
 void update_touch(sys::state& state) {
 	if(touch.current != touch_tracker::mode::pending)
 		return;
 	if(std::chrono::steady_clock::now() - touch.down_time < long_press_time)
 		return;
-	auto const x = int32_t(touch.start_x), y = int32_t(touch.start_y);
-	game_rbutton(state, x, y, true, sys::key_modifiers::modifiers_none);
-	game_rbutton(state, x, y, false, sys::key_modifiers::modifiers_none);
 	start_flash(touch_tracker::flash::long_press);
-	touch.current = touch_tracker::mode::ignore_until_up;
+	touch.current = touch_tracker::mode::held;
+	android_haptic(); // avisa que o toque longo valeu
 }
 
 // mouse USB/Bluetooth: repassa direto como no desktop
@@ -944,6 +1258,38 @@ float android_default_ui_scale(int32_t width, int32_t height, int32_t density_dp
 	return chosen;
 }
 
+void android_offer_continue(sys::state& state) {
+	if(state.network_mode != sys::network_mode_type::single_player)
+		return;
+	auto saves = simple_fs::get_or_create_save_game_directory(state.mod_save_dir);
+	if(simple_fs::open_file(saves, NATIVE("android_autosave.bin")))
+		android_ask_continue();
+}
+
+void android_continue_game() {
+	continue_requested.store(true);
+}
+
+void android_text_result(char const* text) {
+	std::lock_guard lock(text_result_mutex);
+	if(text)
+		text_result = std::string(text);
+	else
+		text_result_cancelled = true;
+}
+
+void android_set_setting(char const* key, int32_t value) {
+	std::string_view const k = key ? key : "";
+	if(k == "render_scale")
+		pending_render_scale.store(value);
+	else if(k == "fps_limit")
+		pending_fps_limit.store(value);
+	else if(k == "perf_counter")
+		pending_perf_counter.store(value ? 1 : 0);
+	else
+		ALICE_LOGE("ajuste desconhecido: %s", key ? key : "(nulo)");
+}
+
 void android_start_game(sys::state& state) {
 	auto& win = *state.win_ptr;
 	assert(win.egl_surface != EGL_NO_SURFACE && !win.game_started);
@@ -990,6 +1336,11 @@ void android_start_game(sys::state& state) {
 	// herdam a prioridade de quem as cria, e as do jogo ja foram criadas.
 	if(setpriority(PRIO_PROCESS, gettid(), -8) != 0)
 		ALICE_LOGE("nao foi possivel subir a prioridade da thread de desenho (errno %d)", errno);
+
+	// e, pelo mesmo motivo, os nucleos (ver "nucleos do processador")
+	if(!cpus.detected)
+		detect_cpu_layout();
+	cpus.apply_now = true;
 }
 
 void run_android_main_loop(sys::state& game_state, android_app* app) {
@@ -1018,8 +1369,12 @@ void run_android_main_loop(sys::state& game_state, android_app* app) {
 			break;
 
 		android_launcher_update(game_state);
+		apply_pending_settings(game_state);
 
 		if(can_render(win)) {
+			update_cpu_affinity(win);
+			update_continue(game_state);
+			update_text_input(game_state);
 			update_touch(game_state);
 			render_frame(game_state);
 			update_perf_counter(game_state);

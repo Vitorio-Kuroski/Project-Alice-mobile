@@ -38,7 +38,9 @@ Na primeira vez o app ajusta duas opções para o aparelho. As duas podem ser mu
 
 ### Desempenho
 
-Para aliviar a GPU, o jogo **desenha em 75% da resolução da tela** e o hardware de vídeo do aparelho amplia a imagem, sem custo. Numa tela de 2340×1080, ele desenha em 1755×810, cerca de 44% menos pixels no shader do mapa, que é o mais pesado. O texto fica um pouco menos nítido. O valor fica em `render_scale` (`src/window/window.hpp`); ainda não há opção no jogo para mudá-lo.
+Para aliviar a GPU, o jogo **desenha em 75% da resolução da tela** e o hardware de vídeo do aparelho amplia a imagem, sem custo. Numa tela de 2340×1080, ele desenha em 1755×810, cerca de 44% menos pixels no shader do mapa, que é o mais pesado. O texto fica um pouco menos nítido. Nos **Ajustes do Android** (toque com três dedos) dá para escolher 50%, 60%, 75% ou 100%, limitar o jogo a **30 FPS**, o que esquenta menos o celular, gasta menos bateria e deixa mais processador para a simulação. Lá também se desliga a vibração curta que confirma o toque longo. Os ajustes ficam salvos no app.
+
+Para o processador, a parte do app que **lê o toque e desenha** a tela tem prioridade sobre a simulação e fica presa aos **núcleos rápidos**. Todas as outras threads (simulação, workers do TBB, som) ficam fora de um dos núcleos rápidos, que sobra livre para o desenho. No Snapdragon 675 (2 núcleos rápidos e 6 lentos), isso dá desenho nos núcleos 6–7 e simulação nos 0–6. Os núcleos são descobertos pela frequência máxima de cada um; sem essa informação, ou com menos de 4 núcleos, o Android decide sozinho. O contador de desempenho (três dedos) mostra a divisão em uso.
 
 ### Carregamentos
 
@@ -46,21 +48,28 @@ Ao entrar na partida o jogo monta toda a interface de uma vez, e no celular isso
 
 ### Sair no meio da partida
 
-Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **salva** em `android_autosave.bin`, porque o Android pode fechar apps em segundo plano sem avisar. Para continuar depois, carregue esse save. O arquivo é sempre o mesmo (sobrescrito) e é gravado no máximo uma vez a cada 30 s. Só vale para o modo single-player.
+Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **salva** em `android_autosave.bin`, porque o Android pode fechar apps em segundo plano sem avisar. Ao abrir o jogo de novo, o app pergunta se você quer **continuar** essa partida: "Continuar" carrega o save e já inicia a partida. O arquivo é sempre o mesmo (sobrescrito) e é gravado no máximo uma vez a cada 30 s. Só vale para o modo single-player.
 
 ### Controles
 
 | Gesto | Equivale a |
 |---|---|
 | Toque rápido | Clique esquerdo (selecionar, botões) |
-| Segurar parado por ~0,5 s | Clique direito (ordem de movimento, menu da província) |
+| Segurar parado por ~0,5 s e soltar | Clique direito (ordem de movimento, menu da província) |
+| Segurar ~0,5 s e arrastar no mapa | Caixa de seleção de várias unidades |
 | Arrastar sobre a interface | Arrastar com o botão esquerdo (barras de rolagem, janelas) |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom (mover os dois dedos também arrasta o mapa) |
-| Toque com três dedos | Mostra ou esconde o contador de desempenho: FPS, tempo médio e pior quadro, velocidade do jogo e dias simulados por segundo |
+| Toque com três dedos | Abre os **Ajustes do Android**: contador de desempenho (FPS, tempo médio e pior quadro, velocidade do jogo, dias simulados por segundo e divisão dos núcleos), resolução do desenho, limite de FPS, vibração e **mods** |
 | Botão ou gesto de voltar | ESC (menu do jogo) |
 
+O toque longo dá uma vibração curta (desligável nos Ajustes do Android). Para **digitar** (nome de save, chat, busca), toque no campo de texto do jogo: abre uma janela com o teclado do Android, e o texto confirmado substitui o do campo.
+
 Mouse (com os três botões e a roda) e teclado físico, por USB ou Bluetooth, funcionam como no desktop.
+
+### Mods
+
+Copie o mod para a pasta `mod` do Victoria 2 no aparelho, como no PC (o arquivo `.mod` e a pasta do mod). Depois, nos **Ajustes do Android** (toque com três dedos), toque em **Mods** e marque os que quiser. A escolha vale a partir da próxima abertura do app. Na primeira vez com uma combinação de mods o cenário é montado de novo, o que leva alguns minutos. Mods dos quais um escolhido depende entram junto, e os saves de cada mod ficam numa pasta própria, como no lançador do desktop.
 
 ### Onde ficam os arquivos
 
@@ -68,6 +77,7 @@ Mouse (com os três botões e a roda) e teclado físico, por USB ou Bluetooth, f
 |---|---|
 | Configurações, cenários, saves, `scenario_errors.log` | `Android/data/org.projectalice.mobile/files/.local/share/Alice/` (acessível pelo cabo USB) |
 | Pasta do Victoria 2 escolhida | `Android/data/org.projectalice.mobile/files/game_folder.txt` |
+| Mods escolhidos (um nome por linha) | `Android/data/org.projectalice.mobile/files/android_mods.txt` |
 | Arquivos do Alice extraídos do APK | armazenamento interno do app (`/data/data/org.projectalice.mobile/files/alice`) |
 
 O app nunca escreve na pasta do Victoria 2.
@@ -183,10 +193,6 @@ Outras decisões que valem saber:
 ### Limitações conhecidas
 
 - **Testado em um único aparelho** até agora (Moto One Hyper, Adreno 612). Outras GPUs (Mali, PowerVR) ainda não foram testadas.
-- **Mods:** só o jogo base; falta uma tela de seleção de mods.
-- **Digitar texto** (nome de save, chat) não funciona: a API nativa não entrega os caracteres do teclado virtual. Isso precisa de uma ponte JNI.
-- **Seleção em caixa** de várias unidades com o dedo ainda não existe; dá para selecionar uma por vez.
-- **Retomar depois de o Android fechar o app:** o save de segundo plano é feito, mas é preciso carregá-lo manualmente pelo menu.
 - **Valores de toque** (tempo do segurar, tolerância de movimento, velocidade do zoom da pinça) são palpites a ajustar com testes.
 - **Só arm64-v8a.**
 - **Memória:** texturas S3TC descomprimidas ocupam mais memória de vídeo em GPUs sem suporte a S3TC (Mali, PowerVR).
