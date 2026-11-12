@@ -127,6 +127,10 @@ void android_launcher_update(sys::state& game_state);
 void android_set_loading(char const* message);
 // contador de desempenho (toque de tres dedos); vazio esconde
 void android_set_stats(char const* text);
+// abre o menu "Ajustes do Android" (toque de tres dedos)
+void android_open_settings();
+// ajuste vindo desse menu: render_scale (porcentagem), fps_limit (30/60), perf_counter (0/1)
+void android_set_setting(char const* key, int32_t value);
 
 // Com o cenario carregado e uma superficie EGL ativa: inicia OpenGL, som e o
 // on_create (o final do create_window de window_nix.cpp).

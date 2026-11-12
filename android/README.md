@@ -38,7 +38,7 @@ Na primeira vez o app ajusta duas opções para o aparelho. As duas podem ser mu
 
 ### Desempenho
 
-Para aliviar a GPU, o jogo **desenha em 75% da resolução da tela** e o hardware de vídeo do aparelho amplia a imagem, sem custo. Numa tela de 2340×1080, ele desenha em 1755×810, cerca de 44% menos pixels no shader do mapa, que é o mais pesado. O texto fica um pouco menos nítido. O valor fica em `render_scale` (`src/window/window.hpp`); ainda não há opção no jogo para mudá-lo.
+Para aliviar a GPU, o jogo **desenha em 75% da resolução da tela** e o hardware de vídeo do aparelho amplia a imagem, sem custo. Numa tela de 2340×1080, ele desenha em 1755×810, cerca de 44% menos pixels no shader do mapa, que é o mais pesado. O texto fica um pouco menos nítido. Nos **Ajustes do Android** (toque com três dedos) dá para escolher 50%, 60%, 75% ou 100%, e limitar o jogo a **30 FPS**, o que esquenta menos o celular, gasta menos bateria e deixa mais processador para a simulação. Os ajustes ficam salvos no app.
 
 Para o processador, a parte do app que **lê o toque e desenha** a tela tem prioridade sobre a simulação e fica presa aos **núcleos rápidos**. Todas as outras threads (simulação, workers do TBB, som) ficam fora de um dos núcleos rápidos, que sobra livre para o desenho. No Snapdragon 675 (2 núcleos rápidos e 6 lentos), isso dá desenho nos núcleos 6–7 e simulação nos 0–6. Os núcleos são descobertos pela frequência máxima de cada um; sem essa informação, ou com menos de 4 núcleos, o Android decide sozinho. O contador de desempenho (três dedos) mostra a divisão em uso.
 
@@ -59,7 +59,7 @@ Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **sa
 | Arrastar sobre a interface | Arrastar com o botão esquerdo (barras de rolagem, janelas) |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom (mover os dois dedos também arrasta o mapa) |
-| Toque com três dedos | Mostra ou esconde o contador de desempenho: FPS, tempo médio e pior quadro, velocidade do jogo e dias simulados por segundo |
+| Toque com três dedos | Abre os **Ajustes do Android**: contador de desempenho (FPS, tempo médio e pior quadro, velocidade do jogo, dias simulados por segundo e divisão dos núcleos), resolução do desenho e limite de FPS |
 | Botão ou gesto de voltar | ESC (menu do jogo) |
 
 Mouse (com os três botões e a roda) e teclado físico, por USB ou Bluetooth, funcionam como no desktop.

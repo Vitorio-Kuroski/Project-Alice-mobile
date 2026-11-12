@@ -3,6 +3,7 @@ package org.projectalice.mobile;
 import android.app.AlertDialog;
 import android.app.NativeActivity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -42,6 +43,7 @@ public class AliceActivity extends NativeActivity {
 	}
 
 	private static native void nativeOnGameFolderPicked(String path);
+	private static native void nativeSetSetting(String key, int value);
 
 	private boolean waitingForAllFilesAccess = false;
 	private AlertDialog folderDialog = null;
@@ -49,6 +51,8 @@ public class AliceActivity extends NativeActivity {
 	private final Handler uiHandler = new Handler(Looper.getMainLooper());
 	private AlertDialog loadingDialog = null;
 	private PopupWindow statsPopup = null;
+	private SharedPreferences prefs = null;
+	private boolean perfCounterOn = false;
 	private TextView statsText = null;
 	private Runnable pendingLoadingDialog = null;
 	private TextView loadingText = null;
@@ -58,6 +62,78 @@ public class AliceActivity extends NativeActivity {
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		hideSystemBars();
+		prefs = getSharedPreferences("alice_android", MODE_PRIVATE);
+		nativeSetSetting("render_scale", renderScale());
+		nativeSetSetting("fps_limit", fpsLimit());
+	}
+
+	// --- menu "Ajustes do Android" (toque com tres dedos) ----------------------
+
+	private static final int[] RENDER_SCALES = { 50, 60, 75, 100 };
+
+	private int renderScale() {
+		return prefs.getInt("render_scale", 75);
+	}
+
+	private int fpsLimit() {
+		return prefs.getInt("fps_limit", 60);
+	}
+
+	/** Chamado pelo C++ no toque com tres dedos. */
+	public void openSettings(final String unused) {
+		runOnUiThread(this::showSettingsDialog);
+	}
+
+	private void showSettingsDialog() {
+		if(isFinishing())
+			return;
+		String[] items = {
+			"Contador de desempenho: " + (perfCounterOn ? "ligado" : "desligado"),
+			"Resolução do desenho: " + renderScale() + "%",
+			"Limite de quadros: " + fpsLimit() + " FPS"
+		};
+		AlertDialog dialog = new AlertDialog.Builder(this)
+			.setTitle("Ajustes do Android")
+			.setItems(items, (d, which) -> {
+				switch(which) {
+				case 0:
+					perfCounterOn = !perfCounterOn;
+					nativeSetSetting("perf_counter", perfCounterOn ? 1 : 0);
+					break;
+				case 1:
+					showRenderScaleDialog();
+					return;
+				case 2:
+					int fps = fpsLimit() == 60 ? 30 : 60;
+					prefs.edit().putInt("fps_limit", fps).apply();
+					nativeSetSetting("fps_limit", fps);
+					break;
+				}
+				showSettingsDialog(); // mostra o valor novo
+			})
+			.setNegativeButton("Fechar", null)
+			.create();
+		showWithoutSystemBars(dialog);
+	}
+
+	private void showRenderScaleDialog() {
+		String[] labels = { "50% (mais rápido)", "60%", "75% (padrão)", "100% (mais nítido)" };
+		int current = 2;
+		for(int i = 0; i < RENDER_SCALES.length; ++i) {
+			if(RENDER_SCALES[i] == renderScale())
+				current = i;
+		}
+		AlertDialog dialog = new AlertDialog.Builder(this)
+			.setTitle("Resolução do desenho")
+			.setSingleChoiceItems(labels, current, (d, which) -> {
+				prefs.edit().putInt("render_scale", RENDER_SCALES[which]).apply();
+				nativeSetSetting("render_scale", RENDER_SCALES[which]);
+				d.dismiss();
+				showSettingsDialog();
+			})
+			.setNegativeButton("Voltar", (d, which) -> showSettingsDialog())
+			.create();
+		showWithoutSystemBars(dialog);
 	}
 
 	// O sistema mostra as barras de novo em varias situacoes (dialogos,
@@ -165,12 +241,16 @@ public class AliceActivity extends NativeActivity {
 			.setCancelable(false)
 			.create();
 		loadingDialog.setCanceledOnTouchOutside(false);
-		// Uma janela de dialogo nova traz as barras do sistema de volta. Aberta
-		// sem foco, ja com as barras escondidas, e so depois recebe o foco.
-		Window window = loadingDialog.getWindow();
+		showWithoutSystemBars(loadingDialog);
+	}
+
+	// Uma janela de dialogo nova traz as barras do sistema de volta. Aberta sem
+	// foco, ja com as barras escondidas, e so depois recebe o foco.
+	private void showWithoutSystemBars(AlertDialog dialog) {
+		Window window = dialog.getWindow();
 		if(window != null)
 			window.setFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
-		loadingDialog.show();
+		dialog.show();
 		if(window != null) {
 			WindowInsetsController controller = window.getInsetsController();
 			if(controller != null) {

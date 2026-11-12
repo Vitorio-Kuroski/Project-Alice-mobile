@@ -492,6 +492,10 @@ void android_set_stats(char const* text) {
 	alice_android::call_activity("setStats", text ? text : "");
 }
 
+void android_open_settings() {
+	alice_android::call_activity("openSettings", "");
+}
+
 void android_launcher_update(sys::state& state) {
 	using namespace alice_android;
 	auto& win = *state.win_ptr;
@@ -548,6 +552,15 @@ extern "C" JNIEXPORT void JNICALL Java_org_projectalice_mobile_AliceActivity_nat
 		alice_android::picked_folder = std::string(chars);
 	}
 	env->ReleaseStringUTFChars(path, chars);
+	alice_android::wake_main_loop();
+}
+
+// menu "Ajustes do Android": a AliceActivity manda cada ajuste salvo ao abrir e
+// cada mudanca (thread da interface do Java)
+extern "C" JNIEXPORT void JNICALL Java_org_projectalice_mobile_AliceActivity_nativeSetSetting(JNIEnv* env, jclass, jstring key, jint value) {
+	char const* chars = env->GetStringUTFChars(key, nullptr);
+	window::android_set_setting(chars, int32_t(value));
+	env->ReleaseStringUTFChars(key, chars);
 	alice_android::wake_main_loop();
 }
 

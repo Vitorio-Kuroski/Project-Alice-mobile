@@ -102,6 +102,15 @@ namespace {
 // mouse (sempre em pixels da tela) para as do jogo
 float g_input_scale = 1.f;
 
+// 1 = um quadro por atualizacao da tela (60 FPS); 2 = um a cada duas (30 FPS)
+int32_t g_swap_interval = 1;
+
+// Ajustes do menu "Ajustes do Android" (AliceActivity). Chegam pela thread da
+// interface do Java e sao aplicados pela thread de desenho, no loop.
+std::atomic<int32_t> pending_render_scale{ 0 }; // porcentagem; 0 = nada novo
+std::atomic<int32_t> pending_fps_limit{ 0 };    // 0 = nada novo
+std::atomic<int32_t> pending_perf_counter{ -1 }; // -1 = nada novo
+
 // ---------------------------------------------------------------------------
 // nucleos do processador
 // ---------------------------------------------------------------------------
@@ -344,7 +353,7 @@ bool create_egl_surface(window_data_impl& win, ANativeWindow* native_window) {
 		ALICE_LOGE("eglMakeCurrent falhou (0x%x)", eglGetError());
 		return false;
 	}
-	eglSwapInterval(win.egl_display, 1); // vsync, como o glfwSwapInterval(1) do desktop
+	eglSwapInterval(win.egl_display, g_swap_interval); // vsync (1, como o glfwSwapInterval(1) do desktop) ou 30 FPS
 	return true;
 }
 
@@ -672,8 +681,10 @@ struct perf_counter {
 };
 perf_counter perf;
 
-void toggle_perf_counter() {
-	perf.visible = !perf.visible;
+void set_perf_counter(bool visible) {
+	if(perf.visible == visible)
+		return;
+	perf.visible = visible;
 	perf.frames = 0;
 	perf.worst_ms = 0.f;
 	perf.window_start = perf.last_frame = std::chrono::steady_clock::now();
@@ -718,6 +729,23 @@ void update_perf_counter(sys::state& state) {
 	perf.start_date = date;
 }
 
+// Aplica o que mudou no menu de ajustes. Na thread de desenho (contexto EGL).
+void apply_pending_settings(sys::state& state) {
+	auto& win = *state.win_ptr;
+	if(int32_t const percent = pending_render_scale.exchange(0); percent > 0) {
+		win.render_scale = float(std::clamp(percent, 25, 100)) / 100.f;
+		update_window_size(state); // mede a tela e chama o on_resize do jogo
+	}
+	if(int32_t const fps = pending_fps_limit.exchange(0); fps > 0) {
+		g_swap_interval = fps <= 30 ? 2 : 1;
+		if(win.egl_surface != EGL_NO_SURFACE)
+			eglSwapInterval(win.egl_display, g_swap_interval);
+		ALICE_LOGI("limite de quadros: %d FPS (swap interval %d)", int(fps), int(g_swap_interval));
+	}
+	if(int32_t const perf_on = pending_perf_counter.exchange(-1); perf_on >= 0)
+		set_perf_counter(perf_on != 0);
+}
+
 int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 	int32_t const action = AMotionEvent_getAction(event);
 	int32_t const masked = action & AMOTION_EVENT_ACTION_MASK;
@@ -738,7 +766,7 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 		if(AMotionEvent_getPointerCount(event) == 3 && touch.current != touch_tracker::mode::ignore_until_up) {
 			// terceiro dedo: desfaz a pinca que comecou com os dois primeiros
 			end_single_finger_gesture(state);
-			toggle_perf_counter();
+			android_open_settings();
 			touch.current = touch_tracker::mode::ignore_until_up;
 		} else if(AMotionEvent_getPointerCount(event) == 2 && touch.current != touch_tracker::mode::ignore_until_up) {
 			end_single_finger_gesture(state);
@@ -1086,6 +1114,18 @@ float android_default_ui_scale(int32_t width, int32_t height, int32_t density_dp
 	return chosen;
 }
 
+void android_set_setting(char const* key, int32_t value) {
+	std::string_view const k = key ? key : "";
+	if(k == "render_scale")
+		pending_render_scale.store(value);
+	else if(k == "fps_limit")
+		pending_fps_limit.store(value);
+	else if(k == "perf_counter")
+		pending_perf_counter.store(value ? 1 : 0);
+	else
+		ALICE_LOGE("ajuste desconhecido: %s", key ? key : "(nulo)");
+}
+
 void android_start_game(sys::state& state) {
 	auto& win = *state.win_ptr;
 	assert(win.egl_surface != EGL_NO_SURFACE && !win.game_started);
@@ -1165,6 +1205,7 @@ void run_android_main_loop(sys::state& game_state, android_app* app) {
 			break;
 
 		android_launcher_update(game_state);
+		apply_pending_settings(game_state);
 
 		if(can_render(win)) {
 			update_cpu_affinity(win);
