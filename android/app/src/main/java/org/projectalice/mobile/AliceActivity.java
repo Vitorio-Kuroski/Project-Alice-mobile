@@ -76,6 +76,7 @@ public class AliceActivity extends NativeActivity {
 		hideSystemBars();
 		prefs = getSharedPreferences("alice_android", MODE_PRIVATE);
 		nativeSetSetting("render_scale", renderScale());
+		nativeSetSetting("map_scale", mapScale());
 		nativeSetSetting("fps_limit", fpsLimit());
 	}
 
@@ -83,8 +84,16 @@ public class AliceActivity extends NativeActivity {
 
 	private static final int[] RENDER_SCALES = { 50, 60, 75, 100 };
 
+	// Resolucao da tela (interface) e do mapa, que e desenhado nessa fracao da
+	// resolucao da tela e ampliado: a interface fica nitida mesmo com o mapa
+	// leve. Antes da v0.8 havia so a da tela, com padrao 75%; a chave mudou
+	// para os padroes novos valerem para todo mundo.
 	private int renderScale() {
-		return prefs.getInt("render_scale", 75);
+		return prefs.getInt("screen_scale", 100);
+	}
+
+	private int mapScale() {
+		return prefs.getInt("map_scale", 75);
 	}
 
 	private int fpsLimit() {
@@ -96,16 +105,18 @@ public class AliceActivity extends NativeActivity {
 	}
 
 	/**
-	 * Modo economico: 30 FPS, desenho em 60% e graficos leves (mapa plano,
-	 * menos particulas de comercio). Desligar volta aos padroes: 60 FPS, 75% e
-	 * o globo. Cada ajuste continua mudavel depois, aqui ou nas opcoes do jogo.
+	 * Modo economico: 30 FPS, mapa em 50% (interface em 100%, nitida) e
+	 * graficos leves (mapa plano, menos particulas de comercio). Desligar volta
+	 * aos padroes: 60 FPS, mapa em 75% e o globo. Cada ajuste continua mudavel
+	 * depois, aqui ou nas opcoes do jogo.
 	 */
 	private void setEconomy(boolean on) {
 		int fps = on ? 30 : 60;
-		int scale = on ? 60 : 75;
-		prefs.edit().putBoolean("economy", on).putInt("fps_limit", fps).putInt("render_scale", scale).apply();
+		int map = on ? 50 : 75;
+		prefs.edit().putBoolean("economy", on).putInt("fps_limit", fps).putInt("screen_scale", 100).putInt("map_scale", map).apply();
 		nativeSetSetting("fps_limit", fps);
-		nativeSetSetting("render_scale", scale);
+		nativeSetSetting("render_scale", 100);
+		nativeSetSetting("map_scale", map);
 		nativeSetSetting("light_graphics", on ? 1 : 0);
 	}
 
@@ -133,7 +144,8 @@ public class AliceActivity extends NativeActivity {
 		String[] items = {
 			"Modo econômico: " + (economyOn() ? "ligado" : "desligado"),
 			"Contador de desempenho: " + (perfCounterOn ? "ligado" : "desligado"),
-			"Resolução do desenho: " + renderScale() + "%",
+			"Resolução da interface: " + renderScale() + "%",
+			"Resolução do mapa: " + mapScale() + "%",
 			"Limite de quadros: " + fpsLimit() + " FPS",
 			"Vibrar no toque longo: " + (hapticOn() ? "sim" : "não"),
 			"Mods: " + (chosenMods().isEmpty() ? "nenhum (jogo base)" : chosenMods().size() + " escolhido(s)")
@@ -150,17 +162,20 @@ public class AliceActivity extends NativeActivity {
 					nativeSetSetting("perf_counter", perfCounterOn ? 1 : 0);
 					break;
 				case 2:
-					showRenderScaleDialog();
+					showScaleDialog("Resolução da interface", "screen_scale", "render_scale", renderScale(), 100);
 					return;
 				case 3:
+					showScaleDialog("Resolução do mapa", "map_scale", "map_scale", mapScale(), 75);
+					return;
+				case 4:
 					int fps = fpsLimit() == 60 ? 30 : 60;
 					prefs.edit().putInt("fps_limit", fps).apply();
 					nativeSetSetting("fps_limit", fps);
 					break;
-				case 4:
+				case 5:
 					prefs.edit().putBoolean("haptic", !hapticOn()).apply();
 					break;
-				case 5:
+				case 6:
 					showModsDialog();
 					return;
 				}
@@ -259,18 +274,20 @@ public class AliceActivity extends NativeActivity {
 		showWithoutSystemBars(dialog);
 	}
 
-	private void showRenderScaleDialog() {
-		String[] labels = { "50% (mais rápido)", "60%", "75% (padrão)", "100% (mais nítido)" };
-		int current = 2;
+	private void showScaleDialog(String title, String prefKey, String nativeKey, int current, int standard) {
+		String[] labels = new String[RENDER_SCALES.length];
+		int checked = 0;
 		for(int i = 0; i < RENDER_SCALES.length; ++i) {
-			if(RENDER_SCALES[i] == renderScale())
-				current = i;
+			int v = RENDER_SCALES[i];
+			labels[i] = v + "%" + (v == standard ? " (padrão)" : v == 50 ? " (mais rápido)" : v == 100 ? " (mais nítido)" : "");
+			if(v == current)
+				checked = i;
 		}
 		AlertDialog dialog = new AlertDialog.Builder(this)
-			.setTitle("Resolução do desenho")
-			.setSingleChoiceItems(labels, current, (d, which) -> {
-				prefs.edit().putInt("render_scale", RENDER_SCALES[which]).apply();
-				nativeSetSetting("render_scale", RENDER_SCALES[which]);
+			.setTitle(title)
+			.setSingleChoiceItems(labels, checked, (d, which) -> {
+				prefs.edit().putInt(prefKey, RENDER_SCALES[which]).apply();
+				nativeSetSetting(nativeKey, RENDER_SCALES[which]);
 				d.dismiss();
 				showSettingsDialog();
 			})

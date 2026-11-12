@@ -38,9 +38,9 @@ Na primeira vez o app ajusta duas opções para o aparelho. As duas podem ser mu
 
 ### Desempenho
 
-Para aliviar a GPU, o jogo **desenha em 75% da resolução da tela** e o hardware de vídeo do aparelho amplia a imagem, sem custo. Numa tela de 2340×1080, ele desenha em 1755×810, cerca de 44% menos pixels no shader do mapa, que é o mais pesado. O texto fica um pouco menos nítido. Nos **Ajustes do Android** (toque com três dedos) dá para escolher 50%, 60%, 75% ou 100%, limitar o jogo a **30 FPS**, o que esquenta menos o celular, gasta menos bateria e deixa mais processador para a simulação. Lá também se desliga a vibração curta que confirma o toque longo. Os ajustes ficam salvos no app.
+Para aliviar a GPU, o **mapa** (o shader mais pesado, com dezenas de leituras de textura por pixel) é desenhado em **75% da resolução da tela** numa imagem à parte e ampliado; a **interface** vem por cima em resolução cheia, então o texto fica nítido. Numa tela de 2340×1080, o mapa é desenhado em 1755×810, cerca de 44% menos pixels. Nos **Ajustes do Android** (toque com três dedos) dá para escolher a resolução do mapa e a da interface (50%, 60%, 75% ou 100% cada; o mapa é uma fração da resolução da interface) e limitar o jogo a **30 FPS**, o que esquenta menos o celular, gasta menos bateria e deixa mais processador para a simulação. Lá também se desliga a vibração curta que confirma o toque longo. Os ajustes ficam salvos no app.
 
-O **Modo econômico** dos mesmos ajustes liga de uma vez 30 FPS, desenho em 60% e gráficos leves (mapa plano em vez do globo, metade das partículas das rotas de comércio); desligá-lo volta a 60 FPS, 75% e o globo. Os gráficos leves já vêm ligados na primeira execução e podem ser mudados nas opções do jogo.
+O **Modo econômico** dos mesmos ajustes liga de uma vez 30 FPS, mapa em 50% (interface continua em 100%) e gráficos leves (mapa plano em vez do globo, metade das partículas das rotas de comércio); desligá-lo volta a 60 FPS, mapa em 75% e o globo. Os gráficos leves já vêm ligados na primeira execução e podem ser mudados nas opções do jogo.
 
 Com o tempo correndo, as janelas abertas do jogo são atualizadas no máximo **5 vezes por segundo** (no PC, a cada dia simulado), porque isso roda na mesma thread que lê o toque; com o jogo pausado, na hora. Threads que só esperam trabalho acordam menos vezes por segundo do que no PC.
 
@@ -64,7 +64,7 @@ Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **sa
 | Arrastar sobre a interface | Arrastar com o botão esquerdo (barras de rolagem, janelas) |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom (mover os dois dedos também arrasta o mapa) |
-| Toque com três dedos | Abre os **Ajustes do Android**: modo econômico, contador de desempenho (FPS, tempo médio e pior quadro, velocidade do jogo, dias simulados por segundo e divisão dos núcleos), resolução do desenho, limite de FPS, vibração e **mods** |
+| Toque com três dedos | Abre os **Ajustes do Android**: modo econômico, contador de desempenho (FPS, tempo médio e pior quadro, velocidade do jogo, dias simulados por segundo e divisão dos núcleos), resolução da interface e do mapa, limite de FPS, vibração e **mods** |
 | Botão ou gesto de voltar | ESC (menu do jogo) |
 
 O toque longo dá uma vibração curta (desligável nos Ajustes do Android). Para **digitar** (nome de save, chat, busca), toque no campo de texto do jogo: abre uma janela com o teclado do Android, e o texto confirmado substitui o do campo.
@@ -188,7 +188,7 @@ O código nativo é compilado pelo CMake, não pelo Gradle. O Gradle só empacot
 
 Outras decisões que valem saber:
 
-- **Otimizações para GPU de celular:** renderização em 75% da resolução (`ANativeWindow_setBuffersGeometry`; toque e mouse são convertidos para a escala do desenho), MSAA desligado por padrão, `glInvalidateFramebuffer` do depth/stencil antes de cada troca de quadro (evita gravá-los na memória numa GPU que desenha em blocos) e `-mtune=cortex-a76` (só ajusta a escolha de instruções; continua rodando em qualquer arm64).
+- **Otimizações para GPU de celular:** mapa em resolução reduzida num framebuffer próprio, ampliado com `glBlitFramebuffer` antes da interface (`map::android_map_scale`; o passo das províncias usa o mesmo tamanho), escala opcional da janela inteira (`ANativeWindow_setBuffersGeometry`; toque e mouse são convertidos para a escala do desenho), MSAA desligado por padrão, `glInvalidateFramebuffer` do depth/stencil antes de cada troca de quadro (evita gravá-los na memória numa GPU que desenha em blocos) e `-mtune=cortex-a76` (só ajusta a escolha de instruções; continua rodando em qualquer arm64).
 - **LuaJIT** é linkado de forma estática no Android. A `.so` dele tem nome com versão (`libluajit-5.1.so.2`), que o Android não carrega de dentro do APK.
 - **ICU:** o jogo só usa a quebra de texto do ICU (caracteres, palavras e linhas). No Android 12+ ela vem do sistema (`libicu.so`, carregada com `dlopen`). No Android 11, que não tem ICU público para apps, entra uma implementação própria em `src/text/icu_android_compat.hpp`. Comparada com o ICU nos textos de localização do Alice, ela dá a mesma quebra de linha em ~99% das frases em inglês, alemão e russo; chinês e japonês ficam aproximados.
 - **Sistema de arquivos:** é o mesmo do Linux (`simple_fs_nix.cpp`). `$HOME` aponta para a pasta externa do app, e as raízes do jogo são `[pasta do Victoria 2, pasta interna com assets/]`.

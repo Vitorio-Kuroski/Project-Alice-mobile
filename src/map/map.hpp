@@ -23,6 +23,21 @@ struct scenario_building_context;
 
 namespace map {
 
+#ifdef __ANDROID__
+// Android: o mapa pode ser desenhado numa resolucao menor que a da janela e
+// depois ampliado, com a interface por cima em resolucao cheia (texto nitido).
+// A escala vem do menu "Ajustes do Android" (window_android.cpp).
+inline float android_map_scale = 1.f;
+inline int32_t android_map_size(int32_t full) {
+	int32_t const scaled = int32_t(float(full) * android_map_scale + 0.5f);
+	return scaled > 0 ? scaled : 1;
+}
+// framebuffer onde o passo principal do mapa desenha: 0 (a janela) ou o reduzido
+GLuint android_map_target_framebuffer();
+void android_map_lowres_begin(int32_t width, int32_t height, int32_t full_width, int32_t full_height);
+void android_map_lowres_end(int32_t full_width, int32_t full_height);
+#endif
+
 struct map_vertex {
 	map_vertex(float x, float y) : position_(x, y){};
 	glm::vec2 position_;

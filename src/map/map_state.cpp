@@ -41,9 +41,18 @@ void map_state::render(sys::state& state, uint32_t screen_x, uint32_t screen_y) 
 	update(state);
 	glm::vec2 inverted_map_shift = { glm::mod(pos.data.x, 1.f), pos.data.y};
 	map_space::point_normalized offset = map_space::normalized_from_inverted({ inverted_map_shift });
+	glm::vec2 render_size(screen_x, screen_y);
+#ifdef __ANDROID__
+	// mapa em resolucao reduzida (ver android_map_scale); com MSAA, desenho normal
+	bool const android_lowres = android_map_scale < 0.999f && !ogl::msaa_enabled(state);
+	if(android_lowres) {
+		render_size = glm::vec2(android_map_size(int32_t(screen_x)), android_map_size(int32_t(screen_y)));
+		android_map_lowres_begin(int32_t(render_size.x), int32_t(render_size.y), int32_t(screen_x), int32_t(screen_y));
+	}
+#endif
 	map_data.render(
 		state,
-		glm::vec2(screen_x, screen_y),
+		render_size,
 		offset,
 		zoom,
 		current_view(state),
@@ -51,6 +60,10 @@ void map_state::render(sys::state& state, uint32_t screen_x, uint32_t screen_y) 
 		globe_rotation,
 		time_counter
 	);
+#ifdef __ANDROID__
+	if(android_lowres)
+		android_map_lowres_end(int32_t(screen_x), int32_t(screen_y));
+#endif
 }
 
 glm::vec2 get_port_location(sys::state& state, dcon::province_id p) {

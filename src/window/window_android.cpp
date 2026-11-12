@@ -114,6 +114,7 @@ std::atomic<int32_t> pending_render_scale{ 0 }; // porcentagem; 0 = nada novo
 std::atomic<int32_t> pending_fps_limit{ 0 };    // 0 = nada novo
 std::atomic<int32_t> pending_perf_counter{ -1 }; // -1 = nada novo
 std::atomic<int32_t> pending_light_graphics{ -1 }; // -1 = nada novo; 0/1 = modo economico
+std::atomic<int32_t> pending_map_scale{ 0 };       // porcentagem do mapa; 0 = nada novo
 
 // ---------------------------------------------------------------------------
 // nucleos do processador
@@ -744,6 +745,8 @@ void update_perf_counter(sys::state& state) {
 		float(perf.frames) * 1000.f / elapsed_ms, elapsed_ms / float(perf.frames), perf.worst_ms,
 		speed_text, float(date - perf.start_date) * 1000.f / elapsed_ms,
 		cpus.restrict_simulation ? cpus.description.c_str() : "padrao do Android");
+	size_t const used = strlen(text);
+	snprintf(text + used, sizeof(text) - used, "\ntela %dx%d, mapa %d%%", int(state.x_size), int(state.y_size), int(std::lround(map::android_map_scale * 100.f)));
 	android_set_stats(text);
 	perf.window_start = now;
 	perf.frames = 0;
@@ -775,6 +778,14 @@ void apply_pending_settings(sys::state& state) {
 	}
 	if(int32_t const perf_on = pending_perf_counter.exchange(-1); perf_on >= 0)
 		set_perf_counter(perf_on != 0);
+	if(int32_t const percent = pending_map_scale.exchange(0); percent > 0) {
+		// o mapa e desenhado nessa fracao da resolucao da tela e ampliado; a
+		// interface fica na resolucao cheia (map::android_map_scale)
+		map::android_map_scale = float(std::clamp(percent, 25, 100)) / 100.f;
+		ALICE_LOGI("mapa em %d%% da resolucao da tela", int(percent));
+		if(win.game_started && state.x_size > 0 && state.y_size > 0)
+			dispatch_to_game(state, [&] { state.on_resize(state.x_size, state.y_size, window_state::maximized); });
+	}
 	if(win.game_started) {
 		if(int32_t const light = pending_light_graphics.exchange(-1); light >= 0) {
 			dispatch_to_game(state, [&] {
@@ -1307,6 +1318,8 @@ void android_set_setting(char const* key, int32_t value) {
 		pending_perf_counter.store(value ? 1 : 0);
 	else if(k == "light_graphics")
 		pending_light_graphics.store(value ? 1 : 0);
+	else if(k == "map_scale")
+		pending_map_scale.store(value);
 	else
 		ALICE_LOGE("ajuste desconhecido: %s", key ? key : "(nulo)");
 }

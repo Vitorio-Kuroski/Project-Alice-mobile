@@ -211,7 +211,15 @@ void state::on_resize(int32_t x, int32_t y, window::window_state win_state) {
 	ogl::initialize_msaa(*this, x, y);
 
 	ogl::deinitialize_framebuffer_for_province_indices(*this);
+#ifdef __ANDROID__
+	// o passo das provincias tem o tamanho em que o mapa e desenhado (map_state::render)
+	if(map::android_map_scale < 0.999f && !ogl::msaa_enabled(*this))
+		ogl::initialize_framebuffer_for_province_indices(*this, map::android_map_size(x), map::android_map_size(y));
+	else
+		ogl::initialize_framebuffer_for_province_indices(*this, x, y);
+#else
 	ogl::initialize_framebuffer_for_province_indices(*this, x, y);
+#endif
 
 
 
