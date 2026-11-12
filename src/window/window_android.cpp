@@ -453,6 +453,22 @@ void pause_and_save_on_background(sys::state& state) {
 	command::save_game(state, state.local_player_nation, false, background_save_name);
 }
 
+// "Continuar": a AliceActivity pergunta ao abrir o jogo se ha um salvamento
+// automatico; a resposta chega pela thread do Java e e aplicada no loop.
+std::atomic<bool> continue_requested{ false };
+
+void update_continue(sys::state& state) {
+	if(!continue_requested.exchange(false))
+		return;
+	if(!state.win_ptr->game_started || state.network_mode != sys::network_mode_type::single_player)
+		return;
+	ALICE_LOGI("continuando a partida de %s", background_save_name);
+	// o mesmo que escolher o save na lista e depois "Iniciar": os dois comandos
+	// rodam em ordem na thread do jogo
+	command::load_save_game(state, background_save_name, false);
+	command::notify_start_game(state);
+}
+
 void handle_cmd(android_app* app, int32_t cmd) {
 	auto& state = *static_cast<sys::state*>(app->userData);
 	auto& win = *state.win_ptr;
@@ -1242,6 +1258,18 @@ float android_default_ui_scale(int32_t width, int32_t height, int32_t density_dp
 	return chosen;
 }
 
+void android_offer_continue(sys::state& state) {
+	if(state.network_mode != sys::network_mode_type::single_player)
+		return;
+	auto saves = simple_fs::get_or_create_save_game_directory(state.mod_save_dir);
+	if(simple_fs::open_file(saves, NATIVE("android_autosave.bin")))
+		android_ask_continue();
+}
+
+void android_continue_game() {
+	continue_requested.store(true);
+}
+
 void android_text_result(char const* text) {
 	std::lock_guard lock(text_result_mutex);
 	if(text)
@@ -1345,6 +1373,7 @@ void run_android_main_loop(sys::state& game_state, android_app* app) {
 
 		if(can_render(win)) {
 			update_cpu_affinity(win);
+			update_continue(game_state);
 			update_text_input(game_state);
 			update_touch(game_state);
 			render_frame(game_state);

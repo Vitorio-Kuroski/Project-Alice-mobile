@@ -48,6 +48,7 @@ public class AliceActivity extends NativeActivity {
 	private static native void nativeOnGameFolderPicked(String path);
 	private static native void nativeSetSetting(String key, int value);
 	private static native void nativeOnTextResult(String text);
+	private static native void nativeContinueGame();
 
 	private boolean waitingForAllFilesAccess = false;
 	private AlertDialog folderDialog = null;
@@ -356,6 +357,24 @@ public class AliceActivity extends NativeActivity {
 				window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
 			showWithoutSystemBars(dialog);
 			input.requestFocus();
+		});
+	}
+
+	/**
+	 * Chamado pelo C++ ao abrir o jogo quando ha um salvamento automatico
+	 * (feito ao sair do app no meio da partida).
+	 */
+	public void offerContinue(final String unused) {
+		runOnUiThread(() -> {
+			if(isFinishing())
+				return;
+			AlertDialog dialog = new AlertDialog.Builder(this)
+				.setTitle("Continuar a partida?")
+				.setMessage("Há uma partida salva automaticamente quando você saiu do app.")
+				.setPositiveButton("Continuar", (d, which) -> nativeContinueGame())
+				.setNegativeButton("Agora não", null)
+				.create();
+			showWithoutSystemBars(dialog);
 		});
 	}
 

@@ -134,6 +134,10 @@ void android_haptic();
 // janela de texto da AliceActivity: pedir (com o texto atual do campo) e o resultado (nulo = cancelado)
 void android_request_text(char const* current);
 void android_text_result(char const* text);
+// "Continuar" ao abrir o jogo: oferece se houver android_autosave.bin; a resposta sim chama android_continue_game
+void android_offer_continue(sys::state& state);
+void android_ask_continue();
+void android_continue_game();
 // ajuste vindo desse menu: render_scale (porcentagem), fps_limit (30/60), perf_counter (0/1)
 void android_set_setting(char const* key, int32_t value);
 

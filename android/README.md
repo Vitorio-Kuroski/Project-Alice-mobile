@@ -48,7 +48,7 @@ Ao entrar na partida o jogo monta toda a interface de uma vez, e no celular isso
 
 ### Sair no meio da partida
 
-Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **salva** em `android_autosave.bin`, porque o Android pode fechar apps em segundo plano sem avisar. Para continuar depois, carregue esse save. O arquivo é sempre o mesmo (sobrescrito) e é gravado no máximo uma vez a cada 30 s. Só vale para o modo single-player.
+Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **salva** em `android_autosave.bin`, porque o Android pode fechar apps em segundo plano sem avisar. Ao abrir o jogo de novo, o app pergunta se você quer **continuar** essa partida: "Continuar" carrega o save e já inicia a partida. O arquivo é sempre o mesmo (sobrescrito) e é gravado no máximo uma vez a cada 30 s. Só vale para o modo single-player.
 
 ### Controles
 
@@ -189,7 +189,6 @@ Outras decisões que valem saber:
 
 - **Testado em um único aparelho** até agora (Moto One Hyper, Adreno 612). Outras GPUs (Mali, PowerVR) ainda não foram testadas.
 - **Mods:** só o jogo base; falta uma tela de seleção de mods.
-- **Retomar depois de o Android fechar o app:** o save de segundo plano é feito, mas é preciso carregá-lo manualmente pelo menu.
 - **Valores de toque** (tempo do segurar, tolerância de movimento, velocidade do zoom da pinça) são palpites a ajustar com testes.
 - **Só arm64-v8a.**
 - **Memória:** texturas S3TC descomprimidas ocupam mais memória de vídeo em GPUs sem suporte a S3TC (Mali, PowerVR).

@@ -504,6 +504,10 @@ void android_request_text(char const* current) {
 	alice_android::call_activity("requestText", current ? current : "");
 }
 
+void android_ask_continue() {
+	alice_android::call_activity("offerContinue", "");
+}
+
 void android_launcher_update(sys::state& state) {
 	using namespace alice_android;
 	auto& win = *state.win_ptr;
@@ -541,6 +545,7 @@ void android_launcher_update(sys::state& state) {
 				start_game_threads(state);
 			android_start_game(state);
 			show_progress(""); // a janela de carregamento da abertura fecha com o jogo na tela
+			window::android_offer_continue(state);
 		}
 		break;
 	case load_status::working:
@@ -560,6 +565,12 @@ extern "C" JNIEXPORT void JNICALL Java_org_projectalice_mobile_AliceActivity_nat
 		alice_android::picked_folder = std::string(chars);
 	}
 	env->ReleaseStringUTFChars(path, chars);
+	alice_android::wake_main_loop();
+}
+
+// "Continuar" escolhido na pergunta da abertura
+extern "C" JNIEXPORT void JNICALL Java_org_projectalice_mobile_AliceActivity_nativeContinueGame(JNIEnv*, jclass) {
+	window::android_continue_game();
 	alice_android::wake_main_loop();
 }
 
