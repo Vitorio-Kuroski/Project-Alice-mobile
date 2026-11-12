@@ -9,6 +9,8 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.graphics.Typeface;
@@ -79,6 +81,19 @@ public class AliceActivity extends NativeActivity {
 		return prefs.getInt("fps_limit", 60);
 	}
 
+	private boolean hapticOn() {
+		return prefs.getBoolean("haptic", true);
+	}
+
+	/** Chamado pelo C++ quando o toque longo e reconhecido. */
+	public void haptic(final String unused) {
+		if(!hapticOn())
+			return;
+		Vibrator vibrator = getSystemService(Vibrator.class);
+		if(vibrator != null && vibrator.hasVibrator())
+			vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK));
+	}
+
 	/** Chamado pelo C++ no toque com tres dedos. */
 	public void openSettings(final String unused) {
 		runOnUiThread(this::showSettingsDialog);
@@ -90,7 +105,8 @@ public class AliceActivity extends NativeActivity {
 		String[] items = {
 			"Contador de desempenho: " + (perfCounterOn ? "ligado" : "desligado"),
 			"Resolução do desenho: " + renderScale() + "%",
-			"Limite de quadros: " + fpsLimit() + " FPS"
+			"Limite de quadros: " + fpsLimit() + " FPS",
+			"Vibrar no toque longo: " + (hapticOn() ? "sim" : "não")
 		};
 		AlertDialog dialog = new AlertDialog.Builder(this)
 			.setTitle("Ajustes do Android")
@@ -107,6 +123,9 @@ public class AliceActivity extends NativeActivity {
 					int fps = fpsLimit() == 60 ? 30 : 60;
 					prefs.edit().putInt("fps_limit", fps).apply();
 					nativeSetSetting("fps_limit", fps);
+					break;
+				case 3:
+					prefs.edit().putBoolean("haptic", !hapticOn()).apply();
 					break;
 				}
 				showSettingsDialog(); // mostra o valor novo

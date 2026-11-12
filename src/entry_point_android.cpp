@@ -496,6 +496,10 @@ void android_open_settings() {
 	alice_android::call_activity("openSettings", "");
 }
 
+void android_haptic() {
+	alice_android::call_activity("haptic", "");
+}
+
 void android_launcher_update(sys::state& state) {
 	using namespace alice_android;
 	auto& win = *state.win_ptr;

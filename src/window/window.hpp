@@ -129,6 +129,8 @@ void android_set_loading(char const* message);
 void android_set_stats(char const* text);
 // abre o menu "Ajustes do Android" (toque de tres dedos)
 void android_open_settings();
+// vibracao curta (se ligada nos ajustes)
+void android_haptic();
 // ajuste vindo desse menu: render_scale (porcentagem), fps_limit (30/60), perf_counter (0/1)
 void android_set_setting(char const* key, int32_t value);
 

@@ -882,6 +882,7 @@ void update_touch(sys::state& state) {
 		return;
 	start_flash(touch_tracker::flash::long_press);
 	touch.current = touch_tracker::mode::held;
+	android_haptic(); // avisa que o toque longo valeu
 }
 
 // mouse USB/Bluetooth: repassa direto como no desktop
