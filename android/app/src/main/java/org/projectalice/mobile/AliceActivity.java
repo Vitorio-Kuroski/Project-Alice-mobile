@@ -1,5 +1,12 @@
 package org.projectalice.mobile;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import android.app.AlertDialog;
 import android.app.NativeActivity;
 import android.content.Intent;
@@ -109,7 +116,8 @@ public class AliceActivity extends NativeActivity {
 			"Contador de desempenho: " + (perfCounterOn ? "ligado" : "desligado"),
 			"Resolução do desenho: " + renderScale() + "%",
 			"Limite de quadros: " + fpsLimit() + " FPS",
-			"Vibrar no toque longo: " + (hapticOn() ? "sim" : "não")
+			"Vibrar no toque longo: " + (hapticOn() ? "sim" : "não"),
+			"Mods: " + (chosenMods().isEmpty() ? "nenhum (jogo base)" : chosenMods().size() + " escolhido(s)")
 		};
 		AlertDialog dialog = new AlertDialog.Builder(this)
 			.setTitle("Ajustes do Android")
@@ -130,10 +138,101 @@ public class AliceActivity extends NativeActivity {
 				case 3:
 					prefs.edit().putBoolean("haptic", !hapticOn()).apply();
 					break;
+				case 4:
+					showModsDialog();
+					return;
 				}
 				showSettingsDialog(); // mostra o valor novo
 			})
 			.setNegativeButton("Fechar", null)
+			.create();
+		showWithoutSystemBars(dialog);
+	}
+
+	// --- mods ---------------------------------------------------------------
+	// Os .mod ficam na pasta mod/ do Victoria 2. Os nomes escolhidos vao para
+	// android_mods.txt (lido pelo C++ ao abrir o app). Latin-1 dos dois lados:
+	// o C++ compara os bytes do nome como estao no .mod.
+
+	private static final Pattern MOD_NAME = Pattern.compile("(?m)^\\s*name\\s*=\\s*\"?([^\"\\r\\n]*)\"?");
+
+	private File modsConfigFile() {
+		return new File(getExternalFilesDir(null), "android_mods.txt");
+	}
+
+	private List<String> chosenMods() {
+		List<String> out = new ArrayList<>();
+		try {
+			for(String line : Files.readAllLines(modsConfigFile().toPath(), StandardCharsets.ISO_8859_1)) {
+				if(!line.trim().isEmpty())
+					out.add(line.trim());
+			}
+		} catch(Exception e) {
+			// sem arquivo: nenhum mod
+		}
+		return out;
+	}
+
+	private List<String> availableMods() {
+		List<String> names = new ArrayList<>();
+		try {
+			File folderFile = new File(getExternalFilesDir(null), "game_folder.txt");
+			String folder = new String(Files.readAllBytes(folderFile.toPath()), StandardCharsets.UTF_8).trim();
+			File[] files = new File(folder, "mod").listFiles((dir, name) -> name.toLowerCase().endsWith(".mod"));
+			if(files == null)
+				return names;
+			for(File f : files) {
+				String text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.ISO_8859_1);
+				Matcher m = MOD_NAME.matcher(text);
+				if(m.find() && !m.group(1).trim().isEmpty() && !names.contains(m.group(1).trim()))
+					names.add(m.group(1).trim());
+			}
+		} catch(Exception e) {
+			// sem pasta do jogo ainda
+		}
+		names.sort(String.CASE_INSENSITIVE_ORDER);
+		return names;
+	}
+
+	private void showModsDialog() {
+		List<String> mods = availableMods();
+		if(mods.isEmpty()) {
+			AlertDialog dialog = new AlertDialog.Builder(this)
+				.setTitle("Mods")
+				.setMessage("Nenhum mod encontrado na pasta mod do Victoria 2. Copie os mods (o arquivo .mod e a pasta dele) para lá.")
+				.setPositiveButton("OK", (d, w) -> showSettingsDialog())
+				.create();
+			showWithoutSystemBars(dialog);
+			return;
+		}
+		List<String> chosen = chosenMods();
+		String[] labels = mods.toArray(new String[0]);
+		boolean[] checked = new boolean[labels.length];
+		for(int i = 0; i < labels.length; ++i)
+			checked[i] = chosen.contains(labels[i]);
+		AlertDialog dialog = new AlertDialog.Builder(this)
+			.setTitle("Mods")
+			.setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
+			.setPositiveButton("Salvar", (d, w) -> {
+				StringBuilder sb = new StringBuilder();
+				for(int i = 0; i < labels.length; ++i) {
+					if(checked[i])
+						sb.append(labels[i]).append('\n');
+				}
+				try {
+					Files.write(modsConfigFile().toPath(), sb.toString().getBytes(StandardCharsets.ISO_8859_1));
+				} catch(Exception e) {
+					Toast.makeText(this, "Não foi possível salvar a escolha de mods.", Toast.LENGTH_LONG).show();
+					return;
+				}
+				AlertDialog info = new AlertDialog.Builder(this)
+					.setTitle("Mods")
+					.setMessage("Os mods valem a partir da próxima vez que o app abrir. Feche o app e abra de novo. Na primeira vez com essa combinação de mods o cenário é montado de novo, o que leva alguns minutos. Mods dos quais um escolhido depende entram junto.")
+					.setPositiveButton("OK", null)
+					.create();
+				showWithoutSystemBars(info);
+			})
+			.setNegativeButton("Voltar", (d, w) -> showSettingsDialog())
 			.create();
 		showWithoutSystemBars(dialog);
 	}
