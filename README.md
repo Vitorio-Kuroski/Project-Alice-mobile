@@ -29,7 +29,8 @@ Versão para Android do [Project Alice](https://github.com/schombert/Project-Ali
 | Gesto | Equivale a |
 |---|---|
 | Toque rápido | Clique esquerdo |
-| Segurar parado por ~0,5 s | Clique direito |
+| Segurar parado por ~0,5 s e soltar | Clique direito (ordens de movimento etc.) |
+| Segurar ~0,5 s e arrastar no mapa | Caixa de seleção (várias tropas) |
 | Arrastar sobre a interface | Arrastar com o botão esquerdo |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom |

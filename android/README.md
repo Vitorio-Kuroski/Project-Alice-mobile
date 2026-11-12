@@ -55,7 +55,8 @@ Ao trocar de app ou bloquear a tela durante uma partida, o jogo **pausa** e **sa
 | Gesto | Equivale a |
 |---|---|
 | Toque rápido | Clique esquerdo (selecionar, botões) |
-| Segurar parado por ~0,5 s | Clique direito (ordem de movimento, menu da província) |
+| Segurar parado por ~0,5 s e soltar | Clique direito (ordem de movimento, menu da província) |
+| Segurar ~0,5 s e arrastar no mapa | Caixa de seleção de várias unidades |
 | Arrastar sobre a interface | Arrastar com o botão esquerdo (barras de rolagem, janelas) |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom (mover os dois dedos também arrasta o mapa) |
@@ -187,7 +188,6 @@ Outras decisões que valem saber:
 - **Testado em um único aparelho** até agora (Moto One Hyper, Adreno 612). Outras GPUs (Mali, PowerVR) ainda não foram testadas.
 - **Mods:** só o jogo base; falta uma tela de seleção de mods.
 - **Digitar texto** (nome de save, chat) não funciona: a API nativa não entrega os caracteres do teclado virtual. Isso precisa de uma ponte JNI.
-- **Seleção em caixa** de várias unidades com o dedo ainda não existe; dá para selecionar uma por vez.
 - **Retomar depois de o Android fechar o app:** o save de segundo plano é feito, mas é preciso carregá-lo manualmente pelo menu.
 - **Valores de toque** (tempo do segurar, tolerância de movimento, velocidade do zoom da pinça) são palpites a ajustar com testes.
 - **Só arm64-v8a.**

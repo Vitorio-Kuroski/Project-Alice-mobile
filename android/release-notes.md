@@ -23,7 +23,8 @@ Versão de testes do **Project Alice para Android**: o motor de código aberto p
 | Gesto | Equivale a |
 |---|---|
 | Toque rápido | Clique esquerdo |
-| Segurar parado por ~0,5 s | Clique direito |
+| Segurar parado por ~0,5 s e soltar | Clique direito (ordens de movimento etc.) |
+| Segurar ~0,5 s e arrastar no mapa | Caixa de seleção (várias tropas) |
 | Arrastar sobre a interface | Arrastar com o botão esquerdo |
 | Arrastar sobre o mapa | Mover o mapa |
 | Pinça com dois dedos | Zoom |
@@ -42,7 +43,6 @@ Mouse e teclado físicos também funcionam.
 
 - Sem seleção de mods; só o jogo base.
 - Não é possível digitar texto (nome de save, chat).
-- Seleção em caixa de várias unidades com o dedo ainda não existe.
 - Entrar na partida leva alguns segundos num celular intermediário.
 
 ## Problemas?

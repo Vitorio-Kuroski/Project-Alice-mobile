@@ -17,7 +17,8 @@
 //
 // Toque -> eventos de mouse do jogo (ver a secao "entrada" abaixo):
 //   toque rapido                -> clique esquerdo
-//   segurar parado (~0,5 s)     -> clique direito (ordens de movimento etc.)
+//   segurar parado (~0,5 s)     -> clique direito ao soltar (ordens de movimento etc.)
+//   segurar e depois arrastar   -> caixa de selecao no mapa (arrasto esquerdo)
 //   arrastar sobre a interface  -> arrasto com o botao esquerdo (barras, janelas)
 //   arrastar sobre o mapa       -> arrasto com o botao do meio (move o mapa)
 //   dois dedos                  -> pinca = zoom (roda do mouse), mover = arrasta o mapa
@@ -515,6 +516,8 @@ struct touch_tracker {
 		pending,         // dedo encostou; ainda nao se sabe se e toque, segurar ou arrasto
 		left_drag,       // arrasto na interface (botao esquerdo)
 		map_pan,         // arrasto no mapa (botao do meio)
+		held,            // segurou parado: clique direito ao soltar, ou caixa se arrastar
+		box_select,      // segurou e arrastou no mapa: caixa de selecao (botao esquerdo)
 		pinch,           // dois dedos
 		ignore_until_up  // gesto ja consumido; espera todos os dedos sairem
 	};
@@ -655,7 +658,7 @@ void pinch_geometry(AInputEvent const* event, float& mid_x, float& mid_y, float&
 void end_single_finger_gesture(sys::state& state) {
 	auto const x = int32_t(touch.last_x), y = int32_t(touch.last_y);
 	auto const mod = sys::key_modifiers::modifiers_none;
-	if(touch.current == touch_tracker::mode::left_drag)
+	if(touch.current == touch_tracker::mode::left_drag || touch.current == touch_tracker::mode::box_select)
 		game_lbutton(state, x, y, false, mod);
 	else if(touch.current == touch_tracker::mode::map_pan || touch.current == touch_tracker::mode::pinch)
 		game_mbutton(state, x, y, false, mod);
@@ -803,6 +806,13 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 		float const x = event_x(event, index);
 		float const y = event_y(event, index);
 
+		if(touch.current == touch_tracker::mode::held) {
+			if(std::hypot(x - touch.start_x, y - touch.start_y) < touch_slop_px(app) || touch_is_over_ui(state))
+				break; // na interface continua valendo o clique direito ao soltar
+			// segurou e arrastou no mapa: caixa de selecao a partir de onde encostou
+			game_lbutton(state, int32_t(touch.start_x), int32_t(touch.start_y), true, mod);
+			touch.current = touch_tracker::mode::box_select;
+		}
 		if(touch.current == touch_tracker::mode::pending) {
 			if(std::hypot(x - touch.start_x, y - touch.start_y) < touch_slop_px(app))
 				break;
@@ -816,7 +826,8 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 				touch.current = touch_tracker::mode::map_pan;
 			}
 		}
-		if(touch.current == touch_tracker::mode::left_drag || touch.current == touch_tracker::mode::map_pan) {
+		if(touch.current == touch_tracker::mode::left_drag || touch.current == touch_tracker::mode::map_pan
+			|| touch.current == touch_tracker::mode::box_select) {
 			touch.last_x = x;
 			touch.last_y = y;
 			game_mouse_move(state, int32_t(x), int32_t(y), mod);
@@ -840,6 +851,12 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 			game_lbutton(state, x, y, false, mod);
 			start_flash(touch_tracker::flash::tap);
 			touch.current = touch_tracker::mode::none;
+		} else if(touch.current == touch_tracker::mode::held) {
+			// segurou e soltou sem arrastar no mapa = clique direito onde encostou
+			auto const x = int32_t(touch.start_x), y = int32_t(touch.start_y);
+			game_rbutton(state, x, y, true, mod);
+			game_rbutton(state, x, y, false, mod);
+			touch.current = touch_tracker::mode::none;
 		} else {
 			end_single_finger_gesture(state);
 		}
@@ -855,17 +872,16 @@ int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
 	return 1;
 }
 
-// Segurar parado nao gera evento, entao o clique direito e verificado a cada frame.
+// Segurar parado nao gera evento, entao o toque longo e verificado a cada
+// frame. Ele so marca o gesto: soltar da o clique direito, arrastar no mapa
+// desenha a caixa de selecao.
 void update_touch(sys::state& state) {
 	if(touch.current != touch_tracker::mode::pending)
 		return;
 	if(std::chrono::steady_clock::now() - touch.down_time < long_press_time)
 		return;
-	auto const x = int32_t(touch.start_x), y = int32_t(touch.start_y);
-	game_rbutton(state, x, y, true, sys::key_modifiers::modifiers_none);
-	game_rbutton(state, x, y, false, sys::key_modifiers::modifiers_none);
 	start_flash(touch_tracker::flash::long_press);
-	touch.current = touch_tracker::mode::ignore_until_up;
+	touch.current = touch_tracker::mode::held;
 }
 
 // mouse USB/Bluetooth: repassa direto como no desktop
