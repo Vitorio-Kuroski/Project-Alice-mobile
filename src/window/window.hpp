@@ -144,6 +144,8 @@ void android_continue_game();
 void android_set_setting(char const* key, int32_t value);
 // "data grande": chamada pela barra de cima do jogo logo depois de desenhar
 void android_after_topbar_render(sys::state& state);
+// minimapa e botoes do canto de baixo a direita em 1,5x: chamada logo depois do minimapa
+void android_after_minimap_render(sys::state& state, ui::element_base& minimap_pic);
 
 // Com o cenario carregado e uma superficie EGL ativa: inicia OpenGL, som e o
 // on_create (o final do create_window de window_nix.cpp).

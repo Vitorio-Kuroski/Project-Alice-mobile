@@ -71,6 +71,8 @@ O toque longo dá uma vibração curta (desligável nos Ajustes do Android). Par
 
 A **caixa da data** (data, nome do país, pausa e + / − da velocidade) aparece com o **dobro do tamanho**, para ficar fácil de tocar; a aba "Logistics" ao lado vai um pouco para a direita. Dá para voltar ao tamanho normal nos Ajustes do Android ("Data e velocidade grandes").
 
+No canto de baixo à direita, o **minimapa**, os botões dos modos do mapa e a coluna de botões ao lado (livro-razão, estatísticas, setas, zoom + / −) aparecem **1,5x maiores**, crescendo para cima e para a esquerda. Dá para voltar ao tamanho normal nos Ajustes do Android ("Minimapa e botões grandes").
+
 Mouse (com os três botões e a roda) e teclado físico, por USB ou Bluetooth, funcionam como no desktop.
 
 ### Mods
