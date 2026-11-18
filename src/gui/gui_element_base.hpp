@@ -93,6 +93,11 @@ public:
 
 	virtual void on_hover(sys::state& state) noexcept { } // when the mouse first moves over the element
 	virtual void on_hover_end(sys::state& state) noexcept { } // when the mouse is no longer over the element
+#ifdef __ANDROID__
+	// Android: botoes de fechar ganham uma area de toque maior (window_android.cpp);
+	// o build release nao tem RTTI para dynamic_cast
+	virtual bool android_is_close_button() const noexcept { return false; }
+#endif
 	virtual focus_result on_get_focus(sys::state& state) noexcept { // used to both react to getting the focus and to accept or reject it
 		return focus_result::ignored;
 	}

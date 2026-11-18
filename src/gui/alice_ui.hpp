@@ -334,6 +334,9 @@ class auto_close_button : public template_icon_button {
 public:
 	ui::message_result on_key_down(sys::state& state, sys::virtual_key key, sys::key_modifiers mods) noexcept override;
 	bool button_action(sys::state& state) noexcept override;
+#ifdef __ANDROID__
+	bool android_is_close_button() const noexcept override { return true; }
+#endif
 };
 
 class template_label : public ui::element_base {

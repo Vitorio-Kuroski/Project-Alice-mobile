@@ -672,6 +672,26 @@ void refresh_under_mouse(sys::state& state, int32_t x, int32_t y) {
 	float const s = state.user_settings.ui_scale;
 	int32_t const lx = int32_t(float(x) / s), ly = int32_t(float(y) / s);
 	auto probe = root->impl_probe_mouse(state, lx, ly, ui::mouse_probe_type::click);
+	// O "X" de fechar janela e pequeno para o dedo: um toque perto dele (ate
+	// close_button_reach unidades da interface) vale como toque nele.
+	if(!probe.under_mouse || !probe.under_mouse->android_is_close_button()) {
+		constexpr int32_t close_button_reach = 16;
+		constexpr int32_t steps[] = { 8, 16 };
+		bool snapped = false;
+		for(int32_t d : steps) {
+			if(snapped || d > close_button_reach)
+				break;
+			int32_t const offsets[8][2] = { { d, 0 }, { -d, 0 }, { 0, d }, { 0, -d }, { d, d }, { -d, d }, { d, -d }, { -d, -d } };
+			for(auto const& o : offsets) {
+				auto near = root->impl_probe_mouse(state, lx + o[0], ly + o[1], ui::mouse_probe_type::click);
+				if(near.under_mouse && near.under_mouse->android_is_close_button()) {
+					probe = near;
+					snapped = true;
+					break;
+				}
+			}
+		}
+	}
 	if(!probe.under_mouse && state.map_state.get_zoom() > map::zoom_close && state.current_scene.recalculate_mouse_probe) {
 		auto const tooltip_probe = root->impl_probe_mouse(state, lx, ly, ui::mouse_probe_type::tooltip);
 		probe = state.current_scene.recalculate_mouse_probe(state, probe, tooltip_probe);
