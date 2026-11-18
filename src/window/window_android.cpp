@@ -108,6 +108,9 @@ namespace {
 // mouse (sempre em pixels da tela) para as do jogo
 float g_input_scale = 1.f;
 
+// "data grande" (ver android_after_topbar_render)
+std::atomic<bool> big_date_enabled{ true };
+
 // desenhar menos com o jogo parado (ver idle_wait_ms)
 constexpr auto idle_after = std::chrono::seconds(2);
 constexpr auto idle_frame_interval = std::chrono::milliseconds(100);
@@ -652,7 +655,10 @@ void dispatch_to_game(sys::state& state, F&& f) {
 	f();
 }
 
+void map_big_date_point(sys::state& state, int32_t& x, int32_t& y); // "data grande"
+
 void game_mouse_move(sys::state& state, int32_t x, int32_t y, sys::key_modifiers mod) {
+	map_big_date_point(state, x, y);
 	dispatch_to_game(state, [&] {
 		state.on_mouse_move(x, y, mod);
 		if(state.win_ptr->left_mouse_down)
@@ -662,6 +668,7 @@ void game_mouse_move(sys::state& state, int32_t x, int32_t y, sys::key_modifiers
 	state.mouse_y_position = y;
 }
 void game_lbutton(sys::state& state, int32_t x, int32_t y, bool down, sys::key_modifiers mod) {
+	map_big_date_point(state, x, y);
 	dispatch_to_game(state, [&] {
 		if(down)
 			state.on_lbutton_down(x, y, mod);
@@ -675,6 +682,7 @@ void game_lbutton(sys::state& state, int32_t x, int32_t y, bool down, sys::key_m
 	state.mouse_y_position = y;
 }
 void game_rbutton(sys::state& state, int32_t x, int32_t y, bool down, sys::key_modifiers mod) {
+	map_big_date_point(state, x, y);
 	dispatch_to_game(state, [&] {
 		if(down)
 			state.on_rbutton_down(x, y, mod);
@@ -685,6 +693,7 @@ void game_rbutton(sys::state& state, int32_t x, int32_t y, bool down, sys::key_m
 	state.mouse_y_position = y;
 }
 void game_mbutton(sys::state& state, int32_t x, int32_t y, bool down, sys::key_modifiers mod) {
+	map_big_date_point(state, x, y);
 	dispatch_to_game(state, [&] {
 		if(down)
 			state.on_mbutton_down(x, y, mod);
@@ -695,6 +704,7 @@ void game_mbutton(sys::state& state, int32_t x, int32_t y, bool down, sys::key_m
 	state.mouse_y_position = y;
 }
 void game_wheel(sys::state& state, int32_t x, int32_t y, float amount, sys::key_modifiers mod) {
+	map_big_date_point(state, x, y);
 	dispatch_to_game(state, [&] { sys::on_mouse_wheel(state, x, y, mod, amount); });
 	if(!state.win_ptr->game_started)
 		touch.placeholder_zoom = std::clamp(touch.placeholder_zoom + amount, -10.f, 10.f);
@@ -963,6 +973,176 @@ void update_text_input(sys::state& state) {
 		for(char32_t c : text)
 			state.on_text(c);
 	});
+}
+
+// ---------------------------------------------------------------------------
+// data grande
+// ---------------------------------------------------------------------------
+//
+// A caixa da data (data, nome do pais, pausa e + / -) e pequena para o dedo.
+// Logo depois que a barra de cima e desenhada, o pedaco da tela com ela e
+// copiado e desenhado de novo com o dobro do tamanho, no mesmo canto de cima;
+// janelas abertas depois continuam por cima. Toques na area ampliada voltam
+// para o ponto correspondente da caixa original. A aba "Logistics", ao lado,
+// e empurrada para fora da area ampliada.
+
+constexpr float big_date_zoom = 2.f;
+constexpr std::string_view big_date_parts[] = { "datetext", "countryname", "pause_bg", "speed_indicator", "button_speedup", "button_speeddown" };
+
+struct big_date_state {
+	bool active = false;     // desenhada no ultimo quadro
+	int32_t src_x = 0, src_y = 0, src_w = 0, src_h = 0; // pixels do jogo, y de cima para baixo
+	GLuint framebuffer = 0, texture = 0;
+	int32_t tex_w = 0, tex_h = 0;
+	ui::element_base* logistics = nullptr;
+	int16_t logistics_x = 0;
+	bool logistics_moved = false;
+};
+big_date_state big_date;
+
+bool topbar_on_screen(sys::state& state) {
+	auto* topbar = state.ui_state.topbar_window;
+	if(!topbar || !topbar->is_visible() || !state.current_scene.get_root)
+		return false;
+	ui::element_base* top = topbar;
+	while(top->parent)
+		top = top->parent;
+	return top == state.current_scene.get_root(state);
+}
+
+// retangulo (unidades da interface) que cobre a caixa da data, com margem para a moldura
+bool big_date_box(sys::state& state, int32_t& x0, int32_t& y0, int32_t& x1, int32_t& y1) {
+	auto* topbar = state.ui_state.topbar_window;
+	bool found = false;
+	for(auto name : big_date_parts) {
+		auto* e = topbar->get_child_by_name(state, name);
+		if(!e)
+			continue;
+		auto pos = ui::get_absolute_location(state, *e);
+		int32_t const ex0 = pos.x, ey0 = pos.y, ex1 = pos.x + e->base_data.size.x, ey1 = pos.y + e->base_data.size.y;
+		x0 = found ? std::min(x0, ex0) : ex0;
+		y0 = found ? std::min(y0, ey0) : ey0;
+		x1 = found ? std::max(x1, ex1) : ex1;
+		y1 = found ? std::max(y1, ey1) : ey1;
+		found = true;
+	}
+	if(!found)
+		return false;
+	x0 -= 10; y0 -= 4; x1 += 6; y1 += 6; // moldura de pergaminho em volta
+	x0 = std::max(x0, 0); y0 = std::max(y0, 0);
+	return x1 > x0 && y1 > y0;
+}
+
+void restore_logistics_tab() {
+	if(big_date.logistics_moved && big_date.logistics)
+		big_date.logistics->base_data.position.x = big_date.logistics_x;
+	big_date.logistics_moved = false;
+}
+
+// a aba ao lado da data fica fora da area ampliada
+void move_logistics_tab(sys::state& state, int32_t box_x0, int32_t box_x1, int32_t box_y0, int32_t box_y1) {
+	auto* tab = state.ui_state.topbar_window->get_child_by_name(state, "topbarbutton_logistics");
+	if(tab != big_date.logistics) {
+		restore_logistics_tab();
+		big_date.logistics = tab;
+	}
+	if(!tab || big_date.logistics_moved)
+		return;
+	auto pos = ui::get_absolute_location(state, *tab);
+	int32_t const big_x1 = box_x0 + int32_t(float(box_x1 - box_x0) * big_date_zoom);
+	int32_t const big_y1 = box_y0 + int32_t(float(box_y1 - box_y0) * big_date_zoom);
+	bool const overlaps = pos.x < big_x1 && pos.x + tab->base_data.size.x > box_x0
+		&& pos.y < big_y1 && pos.y + tab->base_data.size.y > box_y0;
+	if(!overlaps)
+		return;
+	big_date.logistics_x = tab->base_data.position.x;
+	tab->base_data.position.x = int16_t(tab->base_data.position.x + (big_x1 + 4 - pos.x));
+	big_date.logistics_moved = true;
+}
+
+void draw_big_date(sys::state& state) {
+	big_date.active = false;
+	if(!big_date_enabled.load(std::memory_order::relaxed) || !topbar_on_screen(state)) {
+		restore_logistics_tab();
+		return;
+	}
+	int32_t x0, y0, x1, y1;
+	if(!big_date_box(state, x0, y0, x1, y1))
+		return;
+	move_logistics_tab(state, x0, x1, y0, y1);
+
+	float const s = state.user_settings.ui_scale;
+	int32_t const W = state.x_size, H = state.y_size;
+	int32_t const px = int32_t(float(x0) * s), py = int32_t(float(y0) * s);
+	int32_t const pw = std::min(int32_t(float(x1 - x0) * s), W - px);
+	int32_t const ph = std::min(int32_t(float(y1 - y0) * s), H - py);
+	int32_t const bw = std::min(int32_t(float(pw) * big_date_zoom), W - px);
+	int32_t const bh = std::min(int32_t(float(ph) * big_date_zoom), H - py);
+	if(pw <= 0 || ph <= 0)
+		return;
+
+	if(!big_date.framebuffer || big_date.tex_w != pw || big_date.tex_h != ph) {
+		if(big_date.framebuffer)
+			glDeleteFramebuffers(1, &big_date.framebuffer);
+		if(big_date.texture)
+			glDeleteTextures(1, &big_date.texture);
+		glGenTextures(1, &big_date.texture);
+		glBindTexture(GL_TEXTURE_2D, big_date.texture);
+		glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, pw, ph);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glGenFramebuffers(1, &big_date.framebuffer);
+		glBindFramebuffer(GL_FRAMEBUFFER, big_date.framebuffer);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, big_date.texture, 0);
+		bool const ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		big_date.tex_w = pw;
+		big_date.tex_h = ph;
+		if(!ok) {
+			ALICE_LOGE("data grande: framebuffer incompleto");
+			return;
+		}
+	}
+
+	// o OpenGL conta y de baixo para cima
+	GLboolean const scissor = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, big_date.framebuffer);
+	glBlitFramebuffer(px, H - py - ph, px + pw, H - py, 0, 0, pw, ph, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, big_date.framebuffer);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glBlitFramebuffer(0, 0, pw, ph, px, H - py - bh, px + bw, H - py, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	if(scissor)
+		glEnable(GL_SCISSOR_TEST);
+
+	big_date.active = true;
+	big_date.src_x = px;
+	big_date.src_y = py;
+	big_date.src_w = pw;
+	big_date.src_h = ph;
+}
+
+// toque/mouse na area ampliada -> ponto correspondente da caixa original,
+// a nao ser que uma janela do jogo esteja por cima nesse ponto
+void map_big_date_point(sys::state& state, int32_t& x, int32_t& y) {
+	if(!big_date.active)
+		return;
+	int32_t const bw = int32_t(float(big_date.src_w) * big_date_zoom), bh = int32_t(float(big_date.src_h) * big_date_zoom);
+	if(x < big_date.src_x || y < big_date.src_y || x >= big_date.src_x + bw || y >= big_date.src_y + bh)
+		return;
+	auto* root = state.current_scene.get_root ? state.current_scene.get_root(state) : nullptr;
+	if(root) {
+		float const s = state.user_settings.ui_scale;
+		auto const probe = root->impl_probe_mouse(state, int32_t(float(x) / s), int32_t(float(y) / s), ui::mouse_probe_type::click);
+		bool over_topbar = probe.under_mouse == nullptr; // o mapa
+		for(ui::element_base* e = probe.under_mouse; e && !over_topbar; e = e->parent)
+			over_topbar = e == state.ui_state.topbar_window;
+		if(!over_topbar)
+			return; // outra janela do jogo por cima: o toque e dela
+	}
+	x = big_date.src_x + int32_t(float(x - big_date.src_x) / big_date_zoom);
+	y = big_date.src_y + int32_t(float(y - big_date.src_y) / big_date_zoom);
 }
 
 int32_t handle_touch(android_app* app, sys::state& state, AInputEvent* event) {
@@ -1408,6 +1588,10 @@ void android_text_result(char const* text) {
 		text_result_cancelled = true;
 }
 
+void android_after_topbar_render(sys::state& state) {
+	draw_big_date(state);
+}
+
 void android_set_setting(char const* key, int32_t value) {
 	std::string_view const k = key ? key : "";
 	if(k == "render_scale")
@@ -1422,6 +1606,8 @@ void android_set_setting(char const* key, int32_t value) {
 		pending_map_scale.store(value);
 	else if(k == "idle_saver")
 		idle_saver_enabled.store(value != 0);
+	else if(k == "big_date")
+		big_date_enabled.store(value != 0);
 	else if(k == "frame_pacing") {
 		swappy_wanted.store(value != 0);
 		swappy_setting_changed.store(true);

@@ -80,6 +80,7 @@ public class AliceActivity extends NativeActivity {
 		nativeSetSetting("fps_limit", fpsLimit());
 		nativeSetSetting("idle_saver", idleSaverOn() ? 1 : 0);
 		nativeSetSetting("frame_pacing", framePacingOn() ? 1 : 0);
+		nativeSetSetting("big_date", bigDateOn() ? 1 : 0);
 	}
 
 	// --- menu "Ajustes do Android" (toque com tres dedos) ----------------------
@@ -132,6 +133,11 @@ public class AliceActivity extends NativeActivity {
 		return prefs.getBoolean("frame_pacing", true);
 	}
 
+	// caixa da data, pausa e velocidade em dobro (C++: draw_big_date)
+	private boolean bigDateOn() {
+		return prefs.getBoolean("big_date", true);
+	}
+
 	private boolean hapticOn() {
 		return prefs.getBoolean("haptic", true);
 	}
@@ -155,6 +161,7 @@ public class AliceActivity extends NativeActivity {
 			return;
 		String[] items = {
 			"Modo econômico: " + (economyOn() ? "ligado" : "desligado"),
+			"Data e velocidade grandes: " + (bigDateOn() ? "sim" : "não"),
 			"Contador de desempenho: " + (perfCounterOn ? "ligado" : "desligado"),
 			"Resolução da interface: " + renderScale() + "%",
 			"Resolução do mapa: " + mapScale() + "%",
@@ -172,32 +179,36 @@ public class AliceActivity extends NativeActivity {
 					setEconomy(!economyOn());
 					break;
 				case 1:
+					prefs.edit().putBoolean("big_date", !bigDateOn()).apply();
+					nativeSetSetting("big_date", bigDateOn() ? 1 : 0);
+					break;
+				case 2:
 					perfCounterOn = !perfCounterOn;
 					nativeSetSetting("perf_counter", perfCounterOn ? 1 : 0);
 					break;
-				case 2:
+				case 3:
 					showScaleDialog("Resolução da interface", "screen_scale", "render_scale", renderScale(), 100);
 					return;
-				case 3:
+				case 4:
 					showScaleDialog("Resolução do mapa", "map_scale", "map_scale", mapScale(), 75);
 					return;
-				case 4:
+				case 5:
 					int fps = fpsLimit() == 60 ? 30 : 60;
 					prefs.edit().putInt("fps_limit", fps).apply();
 					nativeSetSetting("fps_limit", fps);
 					break;
-				case 5:
+				case 6:
 					prefs.edit().putBoolean("idle_saver", !idleSaverOn()).apply();
 					nativeSetSetting("idle_saver", idleSaverOn() ? 1 : 0);
 					break;
-				case 6:
+				case 7:
 					prefs.edit().putBoolean("frame_pacing", !framePacingOn()).apply();
 					nativeSetSetting("frame_pacing", framePacingOn() ? 1 : 0);
 					break;
-				case 7:
+				case 8:
 					prefs.edit().putBoolean("haptic", !hapticOn()).apply();
 					break;
-				case 8:
+				case 9:
 					showModsDialog();
 					return;
 				}

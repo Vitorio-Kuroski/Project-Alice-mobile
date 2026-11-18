@@ -2238,6 +2238,15 @@ private:
 	army_management_window* army_mgmt_win = nullptr;
 
 public:
+#ifdef __ANDROID__
+	// Android: logo depois da barra de cima, a caixa da data e redesenhada
+	// ampliada (window_android.cpp, "data grande"); janelas abertas depois
+	// continuam por cima dela.
+	void impl_render(sys::state& state, int32_t x, int32_t y) noexcept override {
+		window_element_base::impl_render(state, x, y);
+		window::android_after_topbar_render(state);
+	}
+#endif
 	void on_create(sys::state& state) noexcept override {
 		window_element_base::on_create(state);
 		base_data.position.y += 1;
