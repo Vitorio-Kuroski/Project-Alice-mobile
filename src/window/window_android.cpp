@@ -657,6 +657,35 @@ void dispatch_to_game(sys::state& state, F&& f) {
 
 void map_big_date_point(sys::state& state, int32_t& x, int32_t& y); // "data grande"
 
+// O jogo descobre o elemento sob o cursor (ui_state.under_mouse) uma vez por
+// quadro, no render. No PC o mouse passa por cima do botao antes do clique;
+// no toque, encostar e soltar chegam juntos quando o quadro anterior demorou
+// (ex.: abrir Tecnologia ou Demografia), e o clique ia para o elemento do
+// toque anterior -- era preciso tocar duas vezes. Antes de cada clique, o
+// elemento sob o dedo e recalculado do mesmo jeito que o render faz.
+void refresh_under_mouse(sys::state& state, int32_t x, int32_t y) {
+	if(!state.current_scene.get_root)
+		return;
+	auto* root = state.current_scene.get_root(state);
+	if(!root)
+		return;
+	float const s = state.user_settings.ui_scale;
+	int32_t const lx = int32_t(float(x) / s), ly = int32_t(float(y) / s);
+	auto probe = root->impl_probe_mouse(state, lx, ly, ui::mouse_probe_type::click);
+	if(!probe.under_mouse && state.map_state.get_zoom() > map::zoom_close && state.current_scene.recalculate_mouse_probe) {
+		auto const tooltip_probe = root->impl_probe_mouse(state, lx, ly, ui::mouse_probe_type::tooltip);
+		probe = state.current_scene.recalculate_mouse_probe(state, probe, tooltip_probe);
+	}
+	if(state.ui_state.under_mouse != probe.under_mouse) {
+		if(state.ui_state.under_mouse)
+			state.ui_state.under_mouse->on_hover_end(state);
+		state.ui_state.under_mouse = probe.under_mouse;
+		if(state.ui_state.under_mouse)
+			state.ui_state.under_mouse->on_hover(state);
+	}
+	state.ui_state.relative_mouse_location = probe.relative_location;
+}
+
 void game_mouse_move(sys::state& state, int32_t x, int32_t y, sys::key_modifiers mod) {
 	map_big_date_point(state, x, y);
 	dispatch_to_game(state, [&] {
@@ -670,6 +699,11 @@ void game_mouse_move(sys::state& state, int32_t x, int32_t y, sys::key_modifiers
 void game_lbutton(sys::state& state, int32_t x, int32_t y, bool down, sys::key_modifiers mod) {
 	map_big_date_point(state, x, y);
 	dispatch_to_game(state, [&] {
+		if(down) {
+			state.mouse_x_position = x;
+			state.mouse_y_position = y;
+			refresh_under_mouse(state, x, y);
+		}
 		if(down)
 			state.on_lbutton_down(x, y, mod);
 		else
@@ -684,6 +718,11 @@ void game_lbutton(sys::state& state, int32_t x, int32_t y, bool down, sys::key_m
 void game_rbutton(sys::state& state, int32_t x, int32_t y, bool down, sys::key_modifiers mod) {
 	map_big_date_point(state, x, y);
 	dispatch_to_game(state, [&] {
+		if(down) {
+			state.mouse_x_position = x;
+			state.mouse_y_position = y;
+			refresh_under_mouse(state, x, y);
+		}
 		if(down)
 			state.on_rbutton_down(x, y, mod);
 		else
