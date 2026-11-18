@@ -1076,6 +1076,10 @@ public:
 	void render(sys::state& state, int32_t x, int32_t y) noexcept override {
 		opaque_element_base::render(state, x, y);
 		// TODO draw white box to represent window borders
+#ifdef __ANDROID__
+		// Android: minimapa, modos do mapa e coluna de botoes ampliados (window_android.cpp)
+		window::android_after_minimap_render(state, *this);
+#endif
 	}
 
 	message_result on_lbutton_down(sys::state& state, int32_t x, int32_t y, sys::key_modifiers mods) noexcept override {

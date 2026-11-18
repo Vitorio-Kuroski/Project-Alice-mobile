@@ -498,6 +498,9 @@ public:
 			parent->set_visible(state, false);
 		}
 	}
+#ifdef __ANDROID__
+	bool android_is_close_button() const noexcept override { return true; }
+#endif
 };
 
 class checkbox_button : public button_element_base {
